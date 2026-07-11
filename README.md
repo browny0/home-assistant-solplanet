@@ -1,21 +1,25 @@
 # Solplanet / VoltX Inverter Integration
 
-This integration polls a local [Solplanet inverter dongle](https://solplanet.net/au/products/ai-dongle) (including [VoltX-branded devices](https://voltxenergy.com.au/)) and exposes Inverter, Battery and Smart Meter information for Home Assistant.
+This custom integration connects Home Assistant directly to a local [Solplanet inverter dongle](https://solplanet.net/au/products/ai-dongle), including compatible [VoltX-branded systems](https://voltxenergy.com.au/). It provides inverter, battery, and grid data alongside supported battery and power controls.
 
-This repository is a fork of the upstream integration by `zbigniewmotyka`, with a primary focus on **V2 devices/firmware**.
+This repository is a fork of the upstream integration by [`zbigniewmotyka`](https://github.com/zbigniewmotyka/home-assistant-solplanet), with a primary focus on **V2 devices and firmware**.
 
-> [!Important]
-> This fork does not aim to add new features or fixes for **V1**.
+> [!IMPORTANT]
+> V1 devices have limited support. New features and fixes primarily target V2 systems.
 
 ## Features
 
-- Supports single-phase and three-phase inverters
-- Sensors for inverter, battery and smart meter/s
-- Battery mode control
-- Battery schedule management (set/clear schedule slots)
-- V2 meter “power limit control” (Limit power / Limit current / Zero power)
-- Modbus RTU-over-HTTP (advanced service for writing holding registers)
-- Designed to reduce device “flapping” (serialized polling + graceful degradation on timeouts)
+- Local inverter, battery, meter, and dongle monitoring
+- Battery work-mode and state-of-charge controls
+- Custom charge and discharge schedules
+- V2 grid power-limit controls
+- Single-phase and three-phase inverter support
+
+## Requirements
+
+- Home Assistant 2026.3.0 or newer
+- A compatible Solplanet inverter and network-connected smart dongle
+- The dongle IP address or hostname, reachable from Home Assistant
 
 ## Installation
 
@@ -23,13 +27,19 @@ This repository is a fork of the upstream integration by `zbigniewmotyka`, with 
 
 [![Open in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=calvinbui&repository=home-assistant-solplanet&category=integration)
 
-### Manual installation
+### Manual Installation
 
-1. Place `solplanet` directory inside `config/custom_components` directory
+1. Copy `custom_components/solplanet` into `config/custom_components/solplanet` in your Home Assistant configuration directory.
 2. Restart Home Assistant.
 
-### Setting Up
+## Documentation
 
-1. Add Solplanet from the Integration page.
-2. Enter the IP address or hostname of your Solplanet dongle
-3. The integration will do the rest.
+- [Complete Wiki](https://github.com/calvinbui/home-assistant-solplanet/wiki)
+- [Installation and Setup](https://github.com/calvinbui/home-assistant-solplanet/wiki/Installation-and-Setup)
+- [Quick Start: Charge or Export on a Schedule](https://github.com/calvinbui/home-assistant-solplanet/wiki/Quick-Start)
+- [Energy Dashboard](https://github.com/calvinbui/home-assistant-solplanet/wiki/Energy-Dashboard)
+- [Troubleshooting](https://github.com/calvinbui/home-assistant-solplanet/wiki/Troubleshooting)
+
+## Safety
+
+Some controls can change inverter, battery, grid import, and grid export behaviour. Read the Wiki guidance and confirm your installation requirements before using them.

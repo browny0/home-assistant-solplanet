@@ -1,0 +1,32 @@
+---
+
+name: Publish Wiki
+
+on:
+  push:
+    branches:
+      - main
+      - feat/wiki
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/publish-wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-wiki
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v5
+        with:
+          path: docs/wiki
+          disable-empty-commits: true
