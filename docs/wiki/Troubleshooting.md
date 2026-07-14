@@ -74,10 +74,12 @@ A flashing yellow light commonly indicates lost battery communication. Check the
 
 ## Power Limit Control Stops Charging
 
-- Run **Disable power limit control** against the main meter before the charging window.
+- First confirm whether the limit is optional or is required by the installer or distributor for connection approval.
+- For an optional temporary limit, run **Disable power limit control** against the main meter before the charging window and re-test.
+- Do not disable an approved site export limit as a workaround. Ask the installer or Solplanet to correct the charging behaviour.
 - If disabling fails while using absolute **Limit power**, set **Export power limit setpoint (W)** to 0 without changing the other required fields, then try disabling it again. This workaround does not apply to **Limit current** or **Zero power**.
 - If available, check that the meter's **Power limit control** diagnostic entity reads **Disabled**.
-- Limit automations to the required export window and always add a disable action at the end.
+- For a temporary tariff limit, restrict the automation to the required export window and add a disable action at the end. Leave a permanent approved limit enabled.
 - Re-test after firmware or Solplanet-side changes.
 
 This behaviour varies by inverter and firmware.
