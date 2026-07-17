@@ -21,6 +21,7 @@ from .const import (
     METER_IDENTIFIER,
 )
 from .modbus import DataType
+from .validation import is_zero_filled_battery_payload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -225,6 +226,12 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
                     for isn in battery_isns:
                         try:
                             data = await self.__api.get_battery_data(isn)
+                            if is_zero_filled_battery_payload(data):
+                                _LOGGER.debug(
+                                    "Ignoring transient zero-filled battery data for %s",
+                                    isn,
+                                )
+                                data = prev_batteries.get(isn, {}).get("data")
                             info = await self.__api.get_battery_info(isn)
                             battery_payload[isn] = {
                                 "data": data,
