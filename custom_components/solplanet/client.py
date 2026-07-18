@@ -509,6 +509,7 @@ class GetInverterDataResponse:
         qac2: Phase 2 reactive power in VAr
         pac3: Phase 3 active power in W
         qac3: Phase 3 reactive power in VAr
+        grid_sts: Grid connection status (1=connected, 0=disconnected)
 
     """
 
@@ -537,6 +538,7 @@ class GetInverterDataResponse:
     qac2: int | None = None
     pac3: int | None = None
     qac3: int | None = None
+    grid_sts: int | None = None
 
 
 @dataclass

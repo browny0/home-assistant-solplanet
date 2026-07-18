@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 
 from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
@@ -13,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
 from .client import BatterySchedule
-from .const import BATTERY_IDENTIFIER, DOMAIN
+from .const import BATTERY_IDENTIFIER, DOMAIN, INVERTER_IDENTIFIER
 from .entity import SolplanetEntity, SolplanetEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,6 +77,22 @@ def create_battery_binary_sensors(coordinator, isn: str) -> list[SolplanetBinary
     ]
 
 
+def create_inverter_binary_sensors(coordinator, isn: str) -> list[SolplanetBinarySensorEntityDescription]:
+    """Create binary sensors for inverter."""
+    return [
+        SolplanetBinarySensorEntityDescription(
+            key=f"{isn}_grid_sts",
+            name="Grid Status",
+            device_class=BinarySensorDeviceClass.CONNECTIVITY,
+            data_field_device_type=INVERTER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["grid_sts"],
+            data_field_value_mapper=lambda v: {0: False, 1: True}.get(v),
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+    ]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: SolplanetConfigEntry,
@@ -83,13 +100,22 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensors."""
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    api = hass.data[DOMAIN][entry.entry_id]["api"]
 
     sensors: list[SolplanetBinarySensor] = []
+
     for isn in coordinator.data[BATTERY_IDENTIFIER]:
         sensors.extend(
             SolplanetBinarySensor(description=description, isn=isn, coordinator=coordinator)
             for description in create_battery_binary_sensors(coordinator, isn)
         )
+
+    if api.version == "v2":
+        for isn in coordinator.data[INVERTER_IDENTIFIER]:
+            sensors.extend(
+                SolplanetBinarySensor(description=description, isn=isn, coordinator=coordinator)
+                for description in create_inverter_binary_sensors(coordinator, isn)
+            )
 
     # Always add entities; values may be missing during startup/inverter sleep.
     async_add_entities(sensors)
