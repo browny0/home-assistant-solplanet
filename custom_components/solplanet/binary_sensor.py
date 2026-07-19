@@ -62,7 +62,7 @@ def create_battery_binary_sensors(coordinator, isn: str) -> list[SolplanetBinary
     return [
         SolplanetBinarySensorEntityDescription(
             key=f"{isn}_schedule_configured",
-            name="Schedule Configured",
+            translation_key="schedule_configured",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="schedule",
             data_field_path=["raw"],
@@ -86,7 +86,7 @@ def create_inverter_binary_sensors(coordinator, isn: str) -> list[SolplanetBinar
     return [
         SolplanetBinarySensorEntityDescription(
             key=f"{isn}_grid_sts",
-            name="Grid Status",
+            translation_key="grid_status",
             device_class=BinarySensorDeviceClass.CONNECTIVITY,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",

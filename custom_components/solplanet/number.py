@@ -9,6 +9,7 @@ from homeassistant.components.number import NumberEntity, NumberEntityDescriptio
 from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -72,7 +73,8 @@ def create_battery_entities_description(
     entities = [
         SolplanetNumberEntityDescription(
             key=f"{isn}_soc_max",
-            name="SOC max",
+            translation_key="soc_max",
+            entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="info",
             data_field_path=["charge_max"],
@@ -84,7 +86,8 @@ def create_battery_entities_description(
         ),
         SolplanetNumberEntityDescription(
             key=f"{isn}_soc_min",
-            name="SOC min",
+            translation_key="soc_min",
+            entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="info",
             data_field_path=["discharge_max"],
@@ -96,8 +99,8 @@ def create_battery_entities_description(
         ),
         SolplanetNumberEntityDescription(
             key=f"{isn}_schedule_pin",
-            name="Schedule Input Power",
-            icon="mdi:flash-triangle",
+            translation_key="schedule_input_power",
+            entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="schedule",
             data_field_path=["Pin"],  # Changed to use dict key
@@ -109,8 +112,8 @@ def create_battery_entities_description(
         ),
         SolplanetNumberEntityDescription(
             key=f"{isn}_schedule_pout",
-            name="Schedule Output Power",
-            icon="mdi:flash-triangle-outline",
+            translation_key="schedule_output_power",
+            entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="schedule",
             data_field_path=["Pout"],  # Changed to use dict key
@@ -126,8 +129,8 @@ def create_battery_entities_description(
         entities.append(
             SolplanetNumberEntityDescription(
                 key=f"{isn}_led_brightness",
-                name="LED Brightness",
-                icon="mdi:brightness-6",
+                translation_key="led_brightness",
+                entity_category=EntityCategory.CONFIG,
                 data_field_device_type=BATTERY_IDENTIFIER,
                 data_field_data_type="more_settings",
                 data_field_path=["led_brightness"],

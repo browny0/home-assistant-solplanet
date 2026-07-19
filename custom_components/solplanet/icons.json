@@ -1,0 +1,26 @@
+{
+  "entity": {
+    "button": {
+      "sync_time": { "default": "mdi:clock" },
+      "reboot": { "default": "mdi:restart" }
+    },
+    "number": {
+      "schedule_input_power": { "default": "mdi:flash-triangle" },
+      "schedule_output_power": { "default": "mdi:flash-triangle-outline" },
+      "led_brightness": { "default": "mdi:brightness-6" }
+    },
+    "select": {
+      "led_color": { "default": "mdi:palette" }
+    },
+    "sensor": {
+      "wifi_ssid": { "default": "mdi:wifi" },
+      "wifi_signal_strength": { "default": "mdi:wifi" },
+      "warnings": { "default": "mdi:alert-circle-outline" }
+    },
+    "switch": {
+      "inverter_power": { "default": "mdi:power" },
+      "battery_power": { "default": "mdi:power" },
+      "battery_sleep": { "default": "mdi:sleep" }
+    }
+  }
+}

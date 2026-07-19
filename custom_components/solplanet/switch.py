@@ -64,8 +64,7 @@ def create_inverter_switches(isn: str) -> list[SolplanetSwitchEntityDescription]
     return [
         SolplanetSwitchEntityDescription(
             key=f"{isn}_inverter_power",
-            name="Power",
-            icon="mdi:power",
+            translation_key="inverter_power",
             entity_category=EntityCategory.CONFIG,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="more_settings",
@@ -81,8 +80,7 @@ def create_battery_switches(isn: str) -> list[SolplanetSwitchEntityDescription]:
     return [
         SolplanetSwitchEntityDescription(
             key=f"{isn}_battery_power",
-            name="Power",
-            icon="mdi:power",
+            translation_key="battery_power",
             entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="more_settings",
@@ -92,8 +90,7 @@ def create_battery_switches(isn: str) -> list[SolplanetSwitchEntityDescription]:
         ),
         SolplanetSwitchEntityDescription(
             key=f"{isn}_battery_sleep_enabled",
-            name="Sleep",
-            icon="mdi:sleep",
+            translation_key="battery_sleep",
             entity_category=EntityCategory.CONFIG,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="more_settings",

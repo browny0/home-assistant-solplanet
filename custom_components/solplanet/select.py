@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -119,7 +120,8 @@ def create_battery_entities_description(
     entities = [
         SolplanetSelectEntityDescription(
             key=f"{isn}_work_mode",
-            name="Work mode",
+            translation_key="work_mode",
+            entity_category=EntityCategory.CONFIG,
             unique_id_suffix="work_mode",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="work_modes",
@@ -136,8 +138,8 @@ def create_battery_entities_description(
         entities.append(
             SolplanetSelectEntityDescription(
                 key=f"{isn}_led_color",
-                name="LED Color",
-                icon="mdi:palette",
+                translation_key="led_color",
+                entity_category=EntityCategory.CONFIG,
                 unique_id_suffix="led_color",
                 data_field_device_type=BATTERY_IDENTIFIER,
                 data_field_data_type="more_settings",

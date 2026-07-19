@@ -6,6 +6,8 @@ We organise your system into Home Assistant devices. Open **Settings > Devices &
 
 Your hardware and firmware determine which entities are available. Home Assistant may also generate different entity IDs if names already exist or you rename an entity.
 
+Primary power, energy, state-of-charge, control, warning, and error entities are enabled by default. Detailed phase, MPPT, line, EPS, network, and other high-frequency diagnostic entities are created disabled on new installations to reduce dashboard and recorder noise. To use one, open the device's **Entities** list, include disabled entities in the filter, and enable it. Existing entity-registry choices are preserved when upgrading.
+
 ### Inverter
 
 Use the inverter device to monitor power, production, frequency, temperatures, working hours, errors, and phase or MPPT values. Supported systems also have a **Power** configuration switch.

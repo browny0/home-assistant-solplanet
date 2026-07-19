@@ -281,6 +281,27 @@ async def test_config_entry_setup_registers_real_platform_entities(hass) -> None
     entry.add_to_hass(hass)
     hass.data.setdefault(DOMAIN, {})
 
+    legacy_registry_entry = er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "solplanet_inv-1_pac",
+        suggested_object_id="legacy_inverter_power",
+        config_entry=entry,
+        has_entity_name=False,
+        original_name="Power",
+    )
+    legacy_entity_id = legacy_registry_entry.entity_id
+    legacy_phase_entry = er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "solplanet_inv-1_vac_0",
+        suggested_object_id="legacy_phase_voltage",
+        config_entry=entry,
+        has_entity_name=False,
+        original_name="AC phase 1 voltage",
+    )
+    legacy_phase_entity_id = legacy_phase_entry.entity_id
+
     def metadata_factory(*_args, **kwargs):
         runtime = kwargs["runtime"]
         runtime.data.update(integration_data())
@@ -335,6 +356,20 @@ async def test_config_entry_setup_registers_real_platform_entities(hass) -> None
 
     assert entry.state is config_entries.ConfigEntryState.LOADED
 
+    upgraded_registry_entry = er.async_get(hass).async_get(legacy_entity_id)
+    assert upgraded_registry_entry is not None
+    assert upgraded_registry_entry.entity_id == legacy_entity_id
+    assert upgraded_registry_entry.unique_id == "solplanet_inv-1_pac"
+    assert upgraded_registry_entry.has_entity_name
+    assert upgraded_registry_entry.translation_key == "power"
+
+    upgraded_phase_entry = er.async_get(hass).async_get(legacy_phase_entity_id)
+    assert upgraded_phase_entry is not None
+    assert upgraded_phase_entry.entity_id == legacy_phase_entity_id
+    assert upgraded_phase_entry.disabled_by is None
+    assert upgraded_phase_entry.translation_key == "ac_phase_voltage"
+    assert hass.states.get(legacy_phase_entity_id) is not None
+
     entities = [
         registry_entry
         for registry_entry in er.async_get(hass).entities.values()
@@ -349,7 +384,24 @@ async def test_config_entry_setup_registers_real_platform_entities(hass) -> None
         "sensor",
         "switch",
     }
+    assert all(registry_entry.has_entity_name for registry_entry in entities)
+    assert all(registry_entry.translation_key for registry_entry in entities)
+    assert all(registry_entry.original_name for registry_entry in entities)
+    assert all("{" not in registry_entry.original_name for registry_entry in entities)
+
+    enabled = [registry_entry for registry_entry in entities if registry_entry.disabled_by is None]
+    disabled = [
+        registry_entry
+        for registry_entry in entities
+        if registry_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    ]
+    assert enabled
+    assert disabled
     assert all(
         hass.states.get(registry_entry.entity_id) is not None
-        for registry_entry in entities
+        for registry_entry in enabled
+    )
+    assert all(
+        hass.states.get(registry_entry.entity_id) is None
+        for registry_entry in disabled
     )

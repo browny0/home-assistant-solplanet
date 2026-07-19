@@ -137,7 +137,8 @@ def create_inverter_entities_description(
     sensors = [
         SolplanetSensorEntityDescription(
             key=f"{isn}_flg",
-            name="Inverter Status",
+            translation_key="inverter_status",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["flg"],
@@ -147,7 +148,8 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_err",
-            name="Error code",
+            translation_key="error_code",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["err"],
@@ -156,7 +158,8 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_fac",
-            name="Frequency",
+            translation_key="frequency",
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["fac"],
@@ -168,7 +171,7 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_pac",
-            name="Power",
+            translation_key="power",
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["pac"],
@@ -179,7 +182,8 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_sac",
-            name="Apparent power",
+            translation_key="apparent_power",
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["sac"],
@@ -190,7 +194,8 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_qac",
-            name="Reactive power",
+            translation_key="reactive_power",
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["qac"],
@@ -201,7 +206,8 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_pf",
-            name="Power factor",
+            translation_key="power_factor",
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["pf"],
@@ -211,7 +217,7 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_eto",
-            name="Energy produced total",
+            translation_key="energy_produced_total",
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["eto"],  # codespell:ignore eto
@@ -223,7 +229,7 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_etd",
-            name="Energy produced today",
+            translation_key="energy_produced_today",
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["etd"],
@@ -235,7 +241,9 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_tmp",
-            name="Temperature",
+            translation_key="temperature",
+            entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["tmp"],
@@ -247,7 +255,9 @@ def create_inverter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_hto",
-            name="Total working hours",
+            translation_key="total_working_hours",
+            entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=INVERTER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["hto"],
@@ -263,7 +273,9 @@ def create_inverter_entities_description(
             [
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_pac{i + 1}",
-                    name=f"AC phase {i + 1} power",
+                    translation_key="ac_phase_power",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"pac{i + 1}"],
@@ -273,7 +285,9 @@ def create_inverter_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_qac{i + 1}",
-                    name=f"AC phase {i + 1} reactive power",
+                    translation_key="ac_phase_reactive_power",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"qac{i + 1}"],
@@ -293,7 +307,9 @@ def create_inverter_entities_description(
             [
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_vac_{i}",
-                    name=f"AC phase {i + 1!s} voltage",
+                    translation_key="ac_phase_voltage",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=["vac", i],
@@ -304,7 +320,9 @@ def create_inverter_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_iac_{i}",
-                    name=f"AC phase {i + 1!s} current",
+                    translation_key="ac_phase_current",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=["iac", i],
@@ -321,7 +339,9 @@ def create_inverter_entities_description(
             [
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_vpv_{i}",
-                    name=f"MPPT {i + 1!s} voltage",
+                    translation_key="mppt_voltage",
+                    translation_placeholders={"mppt": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=["vpv", i],
@@ -332,7 +352,9 @@ def create_inverter_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_ipv_{i}",
-                    name=f"MPPT {i + 1!s} current",
+                    translation_key="mppt_current",
+                    translation_placeholders={"mppt": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=["ipv", i],
@@ -343,7 +365,9 @@ def create_inverter_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_mppt_power_{i}",
-                    name=f"MPPT {i + 1!s} power",
+                    translation_key="mppt_power",
+                    translation_placeholders={"mppt": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=INVERTER_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[],
@@ -372,7 +396,7 @@ def create_meter_entities_description(
         sensors: list[SolplanetSensorEntityDescription] = [
             SolplanetSensorEntityDescription(
                 key=f"{isn}_power",
-                name="Meter power",
+                translation_key="meter_power",
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["power"],
@@ -383,7 +407,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_uv",
-                name="LN voltage",
+                translation_key="line_neutral_voltage",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["uv"],
@@ -394,7 +419,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_ui",
-                name="LN current",
+                translation_key="line_neutral_current",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["ui"],
@@ -405,7 +431,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_up",
-                name="LN active power",
+                translation_key="line_neutral_active_power",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["up"],
@@ -416,7 +443,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_upf",
-                name="LN power factor",
+                translation_key="line_neutral_power_factor",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["upf"],
@@ -426,7 +454,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_sac",
-                name="Total apparent power",
+                translation_key="total_apparent_power",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["sac"],
@@ -437,7 +466,8 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_prc",
-                name="Total reactive power",
+                translation_key="total_reactive_power",
+                entity_registry_enabled_default=False,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["prc"],
@@ -448,7 +478,7 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_i_today",
-                name="E-grid supplied",
+                translation_key="grid_supplied_today",
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["i_today"],
@@ -459,7 +489,7 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_o_today",
-                name="E-grid feed-in",
+                translation_key="grid_feed_in_today",
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["o_today"],
@@ -470,7 +500,7 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_i_total",
-                name="Total grid supplied",
+                translation_key="total_grid_supplied",
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["i_total"],
@@ -481,7 +511,7 @@ def create_meter_entities_description(
             ),
             SolplanetSensorEntityDescription(
                 key=f"{isn}_o_total",
-                name="Total grid feed-in",
+                translation_key="total_grid_feed_in",
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="app_data",
                 data_field_path=["o_total"],
@@ -521,7 +551,7 @@ def create_meter_entities_description(
         sensors.append(
             SolplanetSensorEntityDescription(
                 key=f"{isn}_power_limit_control",
-                name="Power limit control",
+                translation_key="power_limit_control",
                 entity_category=EntityCategory.DIAGNOSTIC,
                 data_field_device_type=METER_IDENTIFIER,
                 data_field_data_type="meter_req",
@@ -542,7 +572,7 @@ def create_meter_entities_description(
     sensors: list[SolplanetSensorEntityDescription] = [
         SolplanetSensorEntityDescription(
             key=f"{isn}_pac",
-            name="Grid power",
+            translation_key="grid_power",
             data_field_device_type=METER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["pac"],
@@ -552,7 +582,7 @@ def create_meter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_iet",
-            name="Grid energy in total",
+            translation_key="grid_energy_in_total",
             data_field_device_type=METER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["iet"],
@@ -563,7 +593,7 @@ def create_meter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_oet",
-            name="Grid energy out total",
+            translation_key="grid_energy_out_total",
             data_field_device_type=METER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["oet"],
@@ -574,7 +604,7 @@ def create_meter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_itd",
-            name="Grid energy in today",
+            translation_key="grid_energy_in_today",
             data_field_device_type=METER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["itd"],
@@ -585,7 +615,7 @@ def create_meter_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_otd",
-            name="Grid energy out today",
+            translation_key="grid_energy_out_today",
             data_field_device_type=METER_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["otd"],
@@ -619,11 +649,11 @@ def create_dongle_entities_description(
         return _stringify(value) or "No warnings"
 
     return [
-        # ---- Common / useful diagnostics (enabled by default) ----
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_network_mode",
-            name="Network mode",
+            translation_key="network_mode",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["mode"],
@@ -631,9 +661,9 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_network_ssid",
-            name="WiFi SSID",
-            icon="mdi:wifi",
+            translation_key="wifi_ssid",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["sid"],
@@ -641,9 +671,9 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_wifi_rssi",
-            name="WiFi signal strength",
-            icon="mdi:wifi",
+            translation_key="wifi_signal_strength",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["srh"],
@@ -653,8 +683,9 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_network_ip",
-            name="IP address",
+            translation_key="ip_address",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["ip"],
@@ -662,8 +693,9 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_network_gateway",
-            name="Gateway",
+            translation_key="gateway",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["gtw"],
@@ -671,8 +703,9 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_network_netmask",
-            name="Netmask",
+            translation_key="netmask",
             entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="network",
             data_field_path=["msk"],
@@ -680,8 +713,7 @@ def create_dongle_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{dongle_id}_warnings",
-            name="Warnings",
-            icon="mdi:alert-circle-outline",
+            translation_key="warnings",
             entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="warnings",
@@ -698,7 +730,8 @@ def create_battery_entities_description(
     sensors = [
         SolplanetSensorEntityDescription(
             key=f"{isn}_cst",
-            name="Communication status",
+            translation_key="communication_status",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["cst"],
@@ -708,7 +741,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_bst",
-            name="Battery status",
+            translation_key="battery_status",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["bst"],
@@ -716,7 +750,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_eb1",
-            name="Battery errors",
+            translation_key="battery_errors",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=[],
@@ -735,7 +770,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_wb1",
-            name="Battery warnings",
+            translation_key="battery_warnings",
+            entity_category=EntityCategory.DIAGNOSTIC,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=[],
@@ -754,7 +790,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_ppv",
-            name="PV power",
+            translation_key="pv_power",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["ppv"],
@@ -764,7 +800,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_etdpv",
-            name="PV energy today",
+            translation_key="pv_energy_today",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["etdpv"],
@@ -775,7 +811,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_etopv",
-            name="PV energy total",
+            translation_key="pv_energy_total",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["etopv"],
@@ -786,7 +822,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_vb",
-            name="Battery voltage",
+            translation_key="battery_voltage",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["vb"],
@@ -797,7 +834,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_cb",
-            name="Battery current",
+            translation_key="battery_current",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["cb"],
@@ -808,7 +846,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_pb",
-            name="Battery power",
+            translation_key="battery_power",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["pb"],
@@ -818,7 +856,9 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_tb",
-            name="Battery temperature",
+            translation_key="battery_temperature",
+            entity_category=EntityCategory.DIAGNOSTIC,
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["tb"],
@@ -829,7 +869,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_soc",
-            name="Battery state of charge",
+            translation_key="battery_state_of_charge",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["soc"],
@@ -839,7 +879,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_soh",
-            name="Battery state of health",
+            translation_key="battery_state_of_health",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["soh"],
@@ -848,7 +888,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_cli",
-            name="Current limit for charging",
+            translation_key="charging_current_limit",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["cli"],
@@ -859,7 +899,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_clo",
-            name="Current limit for discharging",
+            translation_key="discharging_current_limit",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["clo"],
@@ -870,7 +910,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_ebi",
-            name="Battery energy for charging",
+            translation_key="battery_energy_charging",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["ebi"],
@@ -881,7 +921,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_ebo",
-            name="Battery energy for discharging",
+            translation_key="battery_energy_discharging",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["ebo"],
@@ -892,7 +932,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_eaci",
-            name="AC energy for charging",
+            translation_key="ac_energy_charging",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["eaci"],
@@ -903,7 +943,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_eaco",
-            name="AC energy for discharging",
+            translation_key="ac_energy_discharging",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["eaco"],
@@ -914,7 +954,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_vesp",
-            name="EPS voltage",
+            translation_key="eps_voltage",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["vesp"],
@@ -925,7 +966,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_cesp",
-            name="EPS current",
+            translation_key="eps_current",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["cesp"],
@@ -936,7 +978,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_fesp",
-            name="EPS frequency",
+            translation_key="eps_frequency",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["fesp"],
@@ -947,7 +990,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_pesp",
-            name="EPS power",
+            translation_key="eps_power",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["pesp"],
@@ -957,7 +1000,8 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_rpesp",
-            name="EPS reactive power",
+            translation_key="eps_reactive_power",
+            entity_registry_enabled_default=False,
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["rpesp"],
@@ -967,7 +1011,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_etdesp",
-            name="EPS energy today",
+            translation_key="eps_energy_today",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["etdesp"],
@@ -978,7 +1022,7 @@ def create_battery_entities_description(
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_etoesp",
-            name="EPS energy total",
+            translation_key="eps_energy_total",
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="data",
             data_field_path=["etoesp"],
@@ -994,7 +1038,9 @@ def create_battery_entities_description(
             [
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_vl{i + 1}esp",
-                    name=f"EPS phase {i + 1} voltage",
+                    translation_key="eps_phase_voltage",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=BATTERY_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"vl{i + 1}esp"],
@@ -1005,7 +1051,9 @@ def create_battery_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_il{i + 1}esp",
-                    name=f"EPS phase {i + 1} current",
+                    translation_key="eps_phase_current",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=BATTERY_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"il{i + 1}esp"],
@@ -1016,7 +1064,9 @@ def create_battery_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_pac{i + 1}esp",
-                    name=f"EPS phase {i + 1} power",
+                    translation_key="eps_phase_power",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=BATTERY_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"pac{i + 1}esp"],
@@ -1026,7 +1076,9 @@ def create_battery_entities_description(
                 ),
                 SolplanetSensorEntityDescription(
                     key=f"{isn}_qac{i + 1}esp",
-                    name=f"EPS phase {i + 1} reactive power",
+                    translation_key="eps_phase_reactive_power",
+                    translation_placeholders={"phase": str(i + 1)},
+                    entity_registry_enabled_default=False,
                     data_field_device_type=BATTERY_IDENTIFIER,
                     data_field_data_type="data",
                     data_field_path=[f"qac{i + 1}esp"],

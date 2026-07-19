@@ -50,8 +50,7 @@ def create_dongle_entities_description(
     return [
         SolplanetButtonEntityDescription(
             key=f"{dongle_id}_sync_time",
-            name="Sync time",
-            icon="mdi:clock",
+            translation_key="sync_time",
             entity_category=EntityCategory.CONFIG,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="data",
@@ -61,8 +60,7 @@ def create_dongle_entities_description(
         ),
         SolplanetButtonEntityDescription(
             key=f"{dongle_id}_reboot",
-            name="Reboot",
-            icon="mdi:restart",
+            translation_key="reboot",
             entity_category=EntityCategory.CONFIG,
             data_field_device_type=DONGLE_IDENTIFIER,
             data_field_data_type="data",

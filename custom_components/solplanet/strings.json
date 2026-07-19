@@ -3,15 +3,15 @@
     "step": {
       "user": {
         "data": {
-          "host": "Solplanet inverter ip address / host",
-        "interval": "Live data update interval (seconds)"
+          "host": "Solplanet inverter IP address / host",
+          "interval": "Live data update interval (seconds)"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Solplanet",
-      "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
+        "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
         "data": {
-        "interval": "Live data update interval (seconds)"
+          "interval": "Live data update interval (seconds)"
         }
       }
     },
@@ -28,11 +28,111 @@
     "step": {
       "init": {
         "title": "Configure Solplanet",
-      "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
+        "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
         "data": {
-        "interval": "Live data update interval (seconds)"
+          "interval": "Live data update interval (seconds)"
         }
       }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "schedule_configured": { "name": "Schedule configured" },
+      "grid_status": { "name": "Grid status" }
+    },
+    "button": {
+      "sync_time": { "name": "Sync time" },
+      "reboot": { "name": "Reboot" }
+    },
+    "number": {
+      "soc_max": { "name": "SOC max" },
+      "soc_min": { "name": "SOC min" },
+      "schedule_input_power": { "name": "Schedule input power" },
+      "schedule_output_power": { "name": "Schedule output power" },
+      "led_brightness": { "name": "LED brightness" }
+    },
+    "select": {
+      "work_mode": { "name": "Work mode" },
+      "led_color": { "name": "LED color" }
+    },
+    "sensor": {
+      "inverter_status": { "name": "Inverter status" },
+      "error_code": { "name": "Error code" },
+      "frequency": { "name": "Frequency" },
+      "power": { "name": "Power" },
+      "apparent_power": { "name": "Apparent power" },
+      "reactive_power": { "name": "Reactive power" },
+      "power_factor": { "name": "Power factor" },
+      "energy_produced_total": { "name": "Energy produced total" },
+      "energy_produced_today": { "name": "Energy produced today" },
+      "temperature": { "name": "Temperature" },
+      "total_working_hours": { "name": "Total working hours" },
+      "ac_phase_power": { "name": "AC phase {phase} power" },
+      "ac_phase_reactive_power": { "name": "AC phase {phase} reactive power" },
+      "ac_phase_voltage": { "name": "AC phase {phase} voltage" },
+      "ac_phase_current": { "name": "AC phase {phase} current" },
+      "mppt_voltage": { "name": "MPPT {mppt} voltage" },
+      "mppt_current": { "name": "MPPT {mppt} current" },
+      "mppt_power": { "name": "MPPT {mppt} power" },
+      "meter_power": { "name": "Meter power" },
+      "line_neutral_voltage": { "name": "LN voltage" },
+      "line_neutral_current": { "name": "LN current" },
+      "line_neutral_active_power": { "name": "LN active power" },
+      "line_neutral_power_factor": { "name": "LN power factor" },
+      "total_apparent_power": { "name": "Total apparent power" },
+      "total_reactive_power": { "name": "Total reactive power" },
+      "grid_supplied_today": { "name": "E-grid supplied" },
+      "grid_feed_in_today": { "name": "E-grid feed-in" },
+      "total_grid_supplied": { "name": "Total grid supplied" },
+      "total_grid_feed_in": { "name": "Total grid feed-in" },
+      "power_limit_control": { "name": "Power limit control" },
+      "grid_power": { "name": "Grid power" },
+      "grid_energy_in_total": { "name": "Grid energy in total" },
+      "grid_energy_out_total": { "name": "Grid energy out total" },
+      "grid_energy_in_today": { "name": "Grid energy in today" },
+      "grid_energy_out_today": { "name": "Grid energy out today" },
+      "network_mode": { "name": "Network mode" },
+      "wifi_ssid": { "name": "WiFi SSID" },
+      "wifi_signal_strength": { "name": "WiFi signal strength" },
+      "ip_address": { "name": "IP address" },
+      "gateway": { "name": "Gateway" },
+      "netmask": { "name": "Netmask" },
+      "warnings": { "name": "Warnings" },
+      "communication_status": { "name": "Communication status" },
+      "battery_status": { "name": "Battery status" },
+      "battery_errors": { "name": "Battery errors" },
+      "battery_warnings": { "name": "Battery warnings" },
+      "pv_power": { "name": "PV power" },
+      "pv_energy_today": { "name": "PV energy today" },
+      "pv_energy_total": { "name": "PV energy total" },
+      "battery_voltage": { "name": "Battery voltage" },
+      "battery_current": { "name": "Battery current" },
+      "battery_power": { "name": "Battery power" },
+      "battery_temperature": { "name": "Battery temperature" },
+      "battery_state_of_charge": { "name": "Battery state of charge" },
+      "battery_state_of_health": { "name": "Battery state of health" },
+      "charging_current_limit": { "name": "Current limit for charging" },
+      "discharging_current_limit": { "name": "Current limit for discharging" },
+      "battery_energy_charging": { "name": "Battery energy for charging" },
+      "battery_energy_discharging": { "name": "Battery energy for discharging" },
+      "ac_energy_charging": { "name": "AC energy for charging" },
+      "ac_energy_discharging": { "name": "AC energy for discharging" },
+      "eps_voltage": { "name": "EPS voltage" },
+      "eps_current": { "name": "EPS current" },
+      "eps_frequency": { "name": "EPS frequency" },
+      "eps_power": { "name": "EPS power" },
+      "eps_reactive_power": { "name": "EPS reactive power" },
+      "eps_energy_today": { "name": "EPS energy today" },
+      "eps_energy_total": { "name": "EPS energy total" },
+      "eps_phase_voltage": { "name": "EPS phase {phase} voltage" },
+      "eps_phase_current": { "name": "EPS phase {phase} current" },
+      "eps_phase_power": { "name": "EPS phase {phase} power" },
+      "eps_phase_reactive_power": { "name": "EPS phase {phase} reactive power" }
+    },
+    "switch": {
+      "inverter_power": { "name": "Power" },
+      "battery_power": { "name": "Power" },
+      "battery_sleep": { "name": "Sleep" }
     }
   }
 }

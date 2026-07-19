@@ -51,6 +51,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
 
     entity_description: SolplanetEntityDescription
     unique_id_suffix: str
+    _attr_has_entity_name = True
 
     def __init__(
         self,
