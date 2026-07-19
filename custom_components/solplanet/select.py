@@ -1,20 +1,22 @@
 """Solplanet selects platform."""
 
+import logging
 from collections import abc
 from dataclasses import dataclass
-import logging
 from typing import Any
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
-from .const import BATTERY_IDENTIFIER, BATTERY_MODELS_WITH_LED, DOMAIN
+from .const import BATTERY_IDENTIFIER, BATTERY_MODELS_WITH_LED, DISCOVERY_SIGNAL
 from .coordinator import SolplanetDataUpdateCoordinator
-from .entity import SolplanetEntity, SolplanetEntityDescription
+from .entity import SolplanetEntity, SolplanetEntityDescription, get_entity_unique_id
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 class SolplanetSelectOption:
@@ -67,7 +69,6 @@ class SolplanetSelect(SolplanetEntity, SelectEntity):
 
         if item is not None:
             await self.entity_description.callback(item)
-            self.coordinator.hass.async_create_task(self.coordinator.async_request_refresh())
 
     def _refresh_options(self) -> None:
         self._select_options = self.entity_description.get_options()
@@ -165,19 +166,46 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up select entities for Solplanet from a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
-    sensors: list[SolplanetSelect] = []
+    known_unique_ids: set[str] = set()
 
-    for isn in coordinator.data[BATTERY_IDENTIFIER]:
-        sensors.extend(
-            SolplanetSelect(
-                description=entity_description,
-                isn=isn,
-                coordinator=coordinator,
-            )
-            for entity_description in create_battery_entities_description(coordinator, isn)
-        )
+    def _create_selects(device_ids: set[str]) -> list[SolplanetSelect]:
+        new_selects: list[SolplanetSelect] = []
+        for device_id in device_ids:
+            for description in create_battery_entities_description(coordinator, device_id):
+                unique_id = get_entity_unique_id(description, device_id)
+                if unique_id in known_unique_ids:
+                    continue
+                select = SolplanetSelect(
+                    description=description,
+                    isn=device_id,
+                    coordinator=coordinator,
+                )
+                known_unique_ids.add(unique_id)
+                new_selects.append(select)
+        return new_selects
+
+    @callback
+    def _async_add_discovered_selects(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add selects for batteries found after setup."""
+        if config_entry_id != entry.entry_id or device_type != BATTERY_IDENTIFIER:
+            return
+        async_add_entities(_create_selects(device_ids))
+
+    @callback
+    def _async_add_metadata_descriptions() -> None:
+        """Add controls for battery capabilities first reported after setup."""
+        new_selects = _create_selects(set(coordinator.data[BATTERY_IDENTIFIER]))
+        if new_selects:
+            async_add_entities(new_selects)
+
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_selects))
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_metadata_descriptions))
 
     # Always add entities; values may be missing during startup/inverter sleep.
-    async_add_entities(sensors)
+    async_add_entities(_create_selects(set(coordinator.data[BATTERY_IDENTIFIER])))

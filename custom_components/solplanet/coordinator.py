@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 import logging
+from dataclasses import dataclass, field
+from datetime import timedelta
+from typing import Any
 
+from aiohttp import ClientResponseError
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -15,6 +20,7 @@ from .api_adapter import SolplanetApiAdapter
 from .client import BatterySchedule, BatteryWorkMode, BatteryWorkModes, ScheduleSlot
 from .const import (
     BATTERY_IDENTIFIER,
+    DISCOVERY_SIGNAL,
     DOMAIN,
     DONGLE_IDENTIFIER,
     INVERTER_IDENTIFIER,
@@ -25,33 +31,99 @@ from .validation import is_zero_filled_battery_payload
 
 _LOGGER = logging.getLogger(__name__)
 
+METADATA_UPDATE_INTERVAL = timedelta(hours=1)
+FAILED_UPDATE_INTERVAL = timedelta(minutes=10)
+MAX_FAILED_UPDATES = 3
 
-class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
-    """Solplanet inverter coordinator."""
+type SolplanetData = dict[str, dict[str, dict[str, Any]]]
+
+
+def _empty_data() -> SolplanetData:
+    """Return the shared data structure used by all endpoint coordinators."""
+    return {
+        DONGLE_IDENTIFIER: {},
+        INVERTER_IDENTIFIER: {},
+        BATTERY_IDENTIFIER: {},
+        METER_IDENTIFIER: {},
+    }
+
+
+@dataclass(slots=True)
+class SolplanetRuntimeData:
+    """Runtime state shared by all coordinators for one Solplanet gateway."""
+
+    api: SolplanetApiAdapter
+    data: SolplanetData = field(default_factory=_empty_data)
+    coordinator_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    metadata_coordinator: SolplanetDataUpdateCoordinator | None = field(default=None, init=False)
+    inverter_coordinator: SolplanetDataUpdateCoordinator | None = field(default=None, init=False)
+    battery_coordinator: SolplanetDataUpdateCoordinator | None = field(default=None, init=False)
+    meter_coordinator: SolplanetDataUpdateCoordinator | None = field(default=None, init=False)
+    dongle_coordinator: SolplanetDataUpdateCoordinator | None = field(default=None, init=False)
+
+    @property
+    def coordinator(self) -> SolplanetDataUpdateCoordinator:
+        """Return the metadata coordinator used as the integration controller."""
+        if self.metadata_coordinator is None:
+            raise RuntimeError("Solplanet metadata coordinator is not initialized")
+        return self.metadata_coordinator
+
+    def coordinator_for(self, device_type: str, data_type: str) -> SolplanetDataUpdateCoordinator:
+        """Return the coordinator responsible for an entity's data endpoint."""
+        coordinator: SolplanetDataUpdateCoordinator | None = None
+
+        if device_type == INVERTER_IDENTIFIER and data_type == "data":
+            coordinator = self.inverter_coordinator
+        elif device_type == BATTERY_IDENTIFIER and data_type == "data":
+            coordinator = self.battery_coordinator
+        elif device_type == METER_IDENTIFIER and data_type in {"data", "app_data"}:
+            coordinator = self.meter_coordinator
+        elif device_type == DONGLE_IDENTIFIER and data_type == "warnings":
+            coordinator = self.dongle_coordinator
+
+        return coordinator or self.coordinator
+
+    async def async_request_metadata_refresh(self) -> None:
+        """Refresh settings and metadata after a write."""
+        await self.coordinator.async_request_refresh()
+
+
+class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
+    """Base coordinator for one Solplanet endpoint family."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        api: SolplanetApiAdapter,
-        config_entry_id: str,
-        update_interval: int,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+        name: str,
+        update_interval: timedelta,
+        error_interval: timedelta = FAILED_UPDATE_INTERVAL,
     ) -> None:
-        """Create instance of solplanet coordinator."""
-        self.__api = api
-        self.config_entry_id = config_entry_id
-
-        # Some dongles/inverters are very sensitive to concurrent requests.
-        # Serialize update cycles to reduce timeouts/flapping.
-        self._update_lock = asyncio.Lock()
-
-        _LOGGER.debug("Creating inverter coordinator")
+        """Initialize an endpoint coordinator."""
+        self.runtime = runtime
+        self.__api = runtime.api
+        self.config_entry_id = config_entry.entry_id
+        self._default_interval = update_interval
+        self._error_interval = max(update_interval, error_interval)
+        self._failed_update_count = 0
+        self._source_name = name
+        self.failed_device_ids: set[str] = set()
 
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=update_interval),
+            config_entry=config_entry,
+            name=f"{DOMAIN}_{name}",
+            update_interval=update_interval,
         )
+        # All endpoint coordinators expose the same merged cache to entities.
+        self.data = runtime.data
+
+    @property
+    def api(self) -> SolplanetApiAdapter:
+        """Return the API adapter for this gateway."""
+        return self.__api
 
     def get_max_inverter_rate_w(self) -> int:
         """Return the maximum inverter rated power (W) for this config entry.
@@ -70,370 +142,39 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
 
         return max(rates) if rates else 10000
 
-    async def _async_update_data(self):
-        """Fetch data from REST API.
-
-        The inverter dongle can be slow and may not tolerate concurrent requests well.
-        We intentionally:
-        - serialize update cycles with a lock,
-        - avoid large `asyncio.gather()` fan-outs,
-        - degrade gracefully (keep previous payload sections) where possible to reduce flapping.
-        """
-        async with self._update_lock:
-            previous: dict = self.data or {}
-
-            # Dongle diagnostics (V2 only). These endpoints are served by the dongle itself.
-            prev_dongles: dict = previous.get(DONGLE_IDENTIFIER, {}) if isinstance(previous, dict) else {}
-            dongle_payload: dict[str, dict] = prev_dongles
-
-            if self.__api.version == "v2":
-                try:
-                    dongle_info = await self.__api.client.get("getdev.cgi")
-                    dongle_id = (
-                        dongle_info.get("psn")
-                        or dongle_info.get("ethmac")
-                        or dongle_info.get("wlanmac")
-                        or "unknown"
-                    )
-
-                    # Network info (LAN/WLAN). The sample shows `info=2` for LAN.
-                    try:
-                        network_info = await self.__api.client.get("wlanget.cgi?info=2")
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("Failed fetching dongle network info: %s", err, exc_info=True)
-                        network_info = prev_dongles.get(dongle_id, {}).get("network")
-
-                    # Warnings (device=1). Observed behavior: 404 means no warnings.
-                    warnings: dict | None = None
-                    try:
-                        warnings = await self.__api.client.get("getdevdata.cgi?device=1")
-                    except Exception as err:  # noqa: BLE001
-                        # Keep it lightweight: treat failures (including 404) as "no data".
-                        _LOGGER.debug("Failed fetching dongle warnings: %s", err, exc_info=True)
-                        warnings = prev_dongles.get(dongle_id, {}).get("warnings")
-
-                    dongle_payload = {
-                        dongle_id: {
-                            "data": dongle_info,
-                            "network": network_info,
-                            "warnings": warnings,
-                        }
-                    }
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Failed fetching dongle info: %s", err, exc_info=True)
-
+    async def _async_update_data(self) -> SolplanetData:
+        """Fetch one endpoint family while serializing access to the gateway."""
+        async with self.runtime.coordinator_lock:
             try:
-                _LOGGER.debug("Updating inverters data")
-                inverters_info = await self.__api.get_inverter_info()
+                await self._async_update_runtime_data()
             except Exception as err:
-                _LOGGER.debug(err, stack_info=True, exc_info=True)
-                raise UpdateFailed(f"Error fetching inverter info: {err}") from err
+                self._failed_update_count += 1
+                if self._failed_update_count == MAX_FAILED_UPDATES:
+                    self.update_interval = self._error_interval
+                raise UpdateFailed(f"Error fetching Solplanet {self._source_name} data: {err}") from err
 
-            isns: list[str] = [x.isn for x in inverters_info.inv if x.isn]
-            inverter_payload: dict[str, dict] = {}
+        if self._failed_update_count:
+            self._failed_update_count = 0
+            self.update_interval = self._default_interval
 
-            # Inverter power is controlled via Modbus RTU over `fdbg.cgi`:
-            # - Read holding register offset 0x00C8 (200), quantity 1 (function 0x03)
-            # - Write holding register offset 0x00C8 with 0/1 (function 0x06)
-            # The Modbus helper expects full holding register numbers (40001 + offset).
-            inverter_power_on: bool | None = None
-            try:
-                power_reg = await self.__api.modbus_read_holding_registers(
-                    data_type=DataType.U16,
-                    device_address=3,
-                    register_address=40201,  # 40001 + 200
-                    register_count=1,
-                )
-                if isinstance(power_reg, list):
-                    power_reg = power_reg[0] if power_reg else None
-                if isinstance(power_reg, int):
-                    inverter_power_on = power_reg == 1
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Failed reading inverter power register: %s", err, exc_info=True)
+        return self.runtime.data
 
-            prev_inverters: dict = previous.get(INVERTER_IDENTIFIER, {}) if isinstance(previous, dict) else {}
-            for idx, isn in enumerate(isns):
-                info = inverters_info.inv[idx]
-                prev_more_settings = prev_inverters.get(isn, {}).get("more_settings", {})
-
-                more_settings = (
-                    {"power_on": inverter_power_on} if inverter_power_on is not None else prev_more_settings
-                )
-
-                try:
-                    data = await self.__api.get_inverter_data(isn)
-                    inverter_payload[isn] = {
-                        "data": data,
-                        "info": info,
-                        "more_settings": more_settings,
-                    }
-                except Exception as err:  # noqa: BLE001
-                    # Keep last known inverter data on transient failures.
-                    _LOGGER.debug("Failed fetching inverter data for %s: %s", isn, err, exc_info=True)
-                    if isn in prev_inverters:
-                        inverter_payload[isn] = prev_inverters[isn]
-                    else:
-                        inverter_payload[isn] = {
-                            "data": None,
-                            "info": info,
-                            "more_settings": more_settings,
-                        }
-
-            # Batteries (V2 only)
-            battery_payload: dict[str, dict] = {}
-            prev_batteries: dict = previous.get(BATTERY_IDENTIFIER, {}) if isinstance(previous, dict) else {}
-
-            try:
-                battery_isns: list[str] = [x.isn for x in inverters_info.inv if x.isStorage() and x.isn]
-                schedule: dict | None = None
-
-                # Battery "More Settings" are controlled via Modbus RTU over `fdbg.cgi` using holding-register
-                # offsets: 1500 power, 1501 sleep, 1502 LED color index, 1503 LED brightness.
-                # The Modbus helper expects full holding register numbers (40001 + offset).
-                more_settings: dict | None = None
-
-                if battery_isns:
-                    # getdefine.cgi is global (no sn parameter) so fetch it once
-                    try:
-                        schedule = await self.__api.get_schedule()
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("Failed fetching schedule: %s", err, exc_info=True)
-
-                    # Read the 4-register block once and apply to all battery entries.
-                    try:
-                        regs = await self.__api.modbus_read_holding_registers(
-                            data_type=DataType.U16,
-                            device_address=3,
-                            register_address=41501,  # 40001 + 1500
-                            register_count=4,
-                        )
-                        if isinstance(regs, list) and len(regs) >= 4:
-                            # regs are [power, sleep_flag, led_color, led_brightness]
-                            power_reg = int(regs[0] or 0)
-                            sleep_reg = int(regs[1] or 0)
-                            color_reg = int(regs[2] or 0)
-                            brightness_reg = int(regs[3] or 0)
-                            more_settings = {
-                                "power_on": power_reg == 1,
-                                # Sleep flag semantics: 0 = enabled, 1 = disabled
-                                "sleep_enabled": sleep_reg == 0,
-                                "led_color_index": color_reg,
-                                "led_brightness": brightness_reg,
-                            }
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("Failed reading modbus More Settings: %s", err, exc_info=True)
-
-                    for isn in battery_isns:
-                        try:
-                            data = await self.__api.get_battery_data(isn)
-                            if is_zero_filled_battery_payload(data):
-                                _LOGGER.debug(
-                                    "Ignoring transient zero-filled battery data for %s",
-                                    isn,
-                                )
-                                data = prev_batteries.get(isn, {}).get("data")
-                            info = await self.__api.get_battery_info(isn)
-                            battery_payload[isn] = {
-                                "data": data,
-                                "info": info,
-                                "work_modes": {
-                                    "all": BatteryWorkModes().get_all_modes(info.type, info.mod_r),
-                                    "selected": BatteryWorkModes().get_mode(info.type, info.mod_r),
-                                },
-                                "schedule": schedule or prev_batteries.get(isn, {}).get("schedule", {}),
-                                "more_settings": more_settings
-                                or prev_batteries.get(isn, {}).get("more_settings", {}),
-                            }
-                        except Exception as err:  # noqa: BLE001
-                            _LOGGER.debug(
-                                "Failed fetching battery data for %s: %s",
-                                isn,
-                                err,
-                                exc_info=True,
-                            )
-                            if isn in prev_batteries:
-                                battery_payload[isn] = prev_batteries[isn]
-                            else:
-                                # Provide minimal structure so entities can exist without crashing
-                                battery_payload[isn] = {
-                                    "data": None,
-                                    "info": prev_batteries.get(isn, {}).get("info"),
-                                    "work_modes": prev_batteries.get(isn, {}).get(
-                                        "work_modes", {"all": [], "selected": None}
-                                    ),
-                                    "schedule": schedule or {},
-                                    "more_settings": more_settings or {},
-                                }
-            except NotImplementedError:
-                _LOGGER.info("Battery operations not supported (V1 protocol)")
-                battery_payload = {}
-
-            # Meter
-            meter_payload: dict[str, dict] = {}
-            prev_meter: dict = previous.get(METER_IDENTIFIER, {}) if isinstance(previous, dict) else {}
-            meter_sn: str | None = isns[0] if isns else None
-
-            def _legacy_meter_payload_looks_valid(meter_data: object) -> bool:
-                """Return True if legacy `device=3` meter data looks real vs a stub/zeros payload."""
-                if meter_data is None:
-                    return False
-
-                # `tim` is present and non-empty on working meters.
-                tim = getattr(meter_data, "tim", None)
-                if isinstance(tim, str) and tim.strip():
-                    return True
-
-                # If any core numeric fields are non-zero, treat it as valid.
-                for attr in ("pac", "itd", "otd", "iet", "oet"):
-                    v = getattr(meter_data, attr, None)
-                    if isinstance(v, (int, float)) and v != 0:
-                        return True
-
-                return False
-
-            # V2-only: additional meter inventory + live values via `POST /getting.cgi`.
-            # The response can list multiple meters (main + sub). Live values are attached to the
-            # discovered main meter because `get_meter_data_rsp` does not include a meter selector.
-            app_meters: dict[str, dict] = {}
-            app_primary_sn: str | None = None
-            if self.__api.version == "v2":
-                try:
-                    dev_info_rsp = await self.__api.client.post(
-                        "getting.cgi",
-                        {"cmd": "get_app_dev_info_req", "payload": {"type": [4]}},
-                    )
-                    if dev_info_rsp.get("status") == 200:
-                        payload = dev_info_rsp.get("payload") or {}
-                        main_meters = payload.get("mainMeter") or []
-                        sub_meters = payload.get("subMeter") or []
-
-                        if main_meters and isinstance(main_meters[0], dict):
-                            app_primary_sn = main_meters[0].get("sn")
-
-                        for meter in [*main_meters, *sub_meters]:
-                            if not isinstance(meter, dict):
-                                continue
-                            sn = meter.get("sn") or f"addr_{meter.get('address')}"
-                            app_meters.setdefault(sn, {})["app_info"] = meter
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Failed fetching app meter info: %s", err, exc_info=True)
-
-                try:
-                    meter_data_rsp = await self.__api.client.post(
-                        "getting.cgi",
-                        {"cmd": "get_meter_data_req"},
-                    )
-                    if meter_data_rsp.get("status") == 200:
-                        app_data = meter_data_rsp.get("payload") or {}
-
-                        # The response does not include a meter SN, so attach it to the primary meter
-                        # (main meter) when we know it.
-                        target_sn = app_primary_sn or (next(iter(app_meters)) if app_meters else None)
-                        if target_sn:
-                            app_meters.setdefault(target_sn, {})["app_data"] = app_data
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Failed fetching app meter data: %s", err, exc_info=True)
-
-                # V2 meter config (power limit / zero export)
-                # - get_meter_req gives the control configuration
-                # - get_meter_power_req gives rated current + metering method
-                # These appear to be global for the primary meter.
-                try:
-                    meter_req_rsp = await self.__api.client.post(
-                        "getting.cgi",
-                        {"cmd": "get_meter_req"},
-                    )
-                    if meter_req_rsp.get("status") == 200:
-                        target_sn = app_primary_sn or (next(iter(app_meters)) if app_meters else None)
-                        if target_sn:
-                            app_meters.setdefault(target_sn, {})["meter_req"] = (
-                                meter_req_rsp.get("payload") or {}
-                            )
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Failed fetching meter config (get_meter_req): %s", err, exc_info=True)
-
-                try:
-                    meter_power_rsp = await self.__api.client.post(
-                        "getting.cgi",
-                        {"cmd": "get_meter_power_req"},
-                    )
-                    if meter_power_rsp.get("status") == 200:
-                        target_sn = app_primary_sn or (next(iter(app_meters)) if app_meters else None)
-                        if target_sn:
-                            app_meters.setdefault(target_sn, {})["meter_power"] = (
-                                meter_power_rsp.get("payload") or {}
-                            )
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug(
-                        "Failed fetching meter power config (get_meter_power_req): %s",
-                        err,
-                        exc_info=True,
-                    )
-
-            # V2:
-            # - Prefer app-protocol (`getting.cgi`) meters when supported.
-            # - Some V2 firmwares do not implement `getting.cgi` and return HTTP 404.
-            #   In that case, fall back to legacy meter endpoints (`device=3`) if they look valid.
-            if self.__api.version == "v2":
-                if app_meters:
-                    for sn, entry in app_meters.items():
-                        meter_payload[sn] = {"app_info": entry.get("app_info")}
-                        # Only include app_data on the meter we can currently populate.
-                        if entry.get("app_data") is not None:
-                            meter_payload[sn]["app_data"] = entry.get("app_data")
-                        if entry.get("meter_req") is not None:
-                            meter_payload[sn]["meter_req"] = entry.get("meter_req")
-                        if entry.get("meter_power") is not None:
-                            meter_payload[sn]["meter_power"] = entry.get("meter_power")
-                else:
-                    # App protocol unsupported or returned no meters: try legacy device=3.
-                    try:
-                        legacy_data = await self.__api.get_meter_data()
-                        legacy_info = await self.__api.get_meter_info()
-                        if getattr(legacy_info, "sn", None) is not None:
-                            meter_sn = legacy_info.sn
-                        if meter_sn and _legacy_meter_payload_looks_valid(legacy_data):
-                            meter_payload = {meter_sn: {"data": legacy_data, "info": legacy_info}}
-                        else:
-                            # Keep previous payload on transient failures or stub responses.
-                            meter_payload = prev_meter
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("Failed fetching legacy V2 meter data: %s", err, exc_info=True)
-                        meter_payload = prev_meter
-            else:
-                # V1: use legacy meter endpoints.
-                try:
-                    meter_data = await self.__api.get_meter_data()
-                    meter_info = await self.__api.get_meter_info()
-                    meter = {"data": meter_data, "info": meter_info}
-
-                    if meter_info.sn is not None:
-                        meter_sn = meter_info.sn
-                    if meter_sn:
-                        meter_payload = {meter_sn: meter}
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Failed fetching meter data: %s", err, exc_info=True)
-                    meter_payload = prev_meter
-
-            _LOGGER.debug("Inverters data updated")
-            return {
-                DONGLE_IDENTIFIER: dongle_payload,
-                INVERTER_IDENTIFIER: inverter_payload,
-                BATTERY_IDENTIFIER: battery_payload,
-                METER_IDENTIFIER: meter_payload,
-            }
+    async def _async_update_runtime_data(self) -> None:
+        """Update this endpoint family's section of the shared cache."""
+        raise NotImplementedError
 
     async def set_inverter_power(self, on: bool) -> None:
         """Set inverter power (offset 200). 1=on, 0=off."""
         try:
-            await self.__api.modbus_write_single_holding_register(
-                data_type=DataType.U16,
-                device_address=3,
-                register_address=40201,  # 40001 + 200
-                value=1 if on else 0,
-                dry_run=False,
-            )
-            await self.async_refresh()
+            async with self.runtime.coordinator_lock:
+                await self.__api.modbus_write_single_holding_register(
+                    data_type=DataType.U16,
+                    device_address=3,
+                    register_address=40201,  # 40001 + 200
+                    value=1 if on else 0,
+                    dry_run=False,
+                )
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Modbus operations are not supported with V1 protocol") from err
 
@@ -450,9 +191,10 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
         }
 
         try:
-            await self.__api.client.post("setting.cgi", payload)
-            await self.async_refresh()
-        except Exception as err:  # noqa: BLE001
+            async with self.runtime.coordinator_lock:
+                await self.__api.client.post("setting.cgi", payload)
+            await self.runtime.async_request_metadata_refresh()
+        except Exception as err:
             raise HomeAssistantError(f"Failed to sync dongle time: {err}") from err
 
     async def dongle_reboot(self) -> None:
@@ -467,8 +209,9 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
         }
 
         try:
-            await self.__api.client.post("setting.cgi", payload)
-        except Exception as err:  # noqa: BLE001
+            async with self.runtime.coordinator_lock:
+                await self.__api.client.post("setting.cgi", payload)
+        except Exception as err:
             raise HomeAssistantError(f"Failed to reboot dongle: {err}") from err
 
     async def set_meter_power_limit(self, payload: dict) -> None:
@@ -481,32 +224,31 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
             raise HomeAssistantError("Meter power limit control is not supported with V1 protocol")
 
         try:
-            rsp = await self.__api.client.post(
-                "setting.cgi",
-                {"cmd": "set_meter_req", "payload": payload},
-            )
+            async with self.runtime.coordinator_lock:
+                rsp = await self.__api.client.post(
+                    "setting.cgi",
+                    {"cmd": "set_meter_req", "payload": payload},
+                )
 
             # Expected success response:
             # {"cmd": "set_meter_rsp", "status": 200}
             if not isinstance(rsp, dict) or rsp.get("status") != 200:
                 raise HomeAssistantError(f"Unexpected response from set_meter_req: {rsp}")
 
-            # Do not block the service call waiting for a full coordinator refresh.
-            # A full refresh can take a long time on slow/timeout-prone dongles, making the
-            # Actions UI look like it's 'stuck' even though the write succeeded.
-            self.hass.async_create_task(self.async_request_refresh())
-        except Exception as err:  # noqa: BLE001
+            self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
+        except Exception as err:
             raise HomeAssistantError(f"Failed to set meter power limit: {err}") from err
 
     async def _write_battery_more_setting(self, register_offset: int, value: int) -> None:
         """Write a battery "More Settings" register via Modbus (function 0x10)."""
         try:
-            await self.__api.modbus_write_multiple_holding_registers(
-                device_address=3,
-                register_address=40001 + register_offset,
-                values=[value],
-            )
-            await self.async_refresh()
+            async with self.runtime.coordinator_lock:
+                await self.__api.modbus_write_multiple_holding_registers(
+                    device_address=3,
+                    register_address=40001 + register_offset,
+                    values=[value],
+                )
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Modbus operations are not supported with V1 protocol") from err
 
@@ -529,21 +271,27 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
     async def set_battery_work_mode(self, sn: str, mode: BatteryWorkMode) -> None:
         """Set battery work mode."""
         try:
-            await self.__api.set_battery_work_mode(sn, mode)
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_battery_work_mode(sn, mode)
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
     async def set_battery_soc_min(self, sn: str, value: int) -> None:
         """Set battery soc min."""
         try:
-            await self.__api.set_battery_soc_min(sn, value)
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_battery_soc_min(sn, value)
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
     async def set_battery_soc_max(self, sn: str, value: int) -> None:
         """Set battery soc max."""
         try:
-            await self.__api.set_battery_soc_max(sn, value)
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_battery_soc_max(sn, value)
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
@@ -551,34 +299,548 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator):
         """Set battery schedule slots."""
         try:
             _LOGGER.debug("Setting schedule slots for %s: %s", sn, slots)
-            current = await self.__api.get_schedule()
-            raw_schedule = BatterySchedule.encode_schedule(
-                slots, pin=current["raw"].get("Pin", 0), pout=current["raw"].get("Pout", 0)
-            )
-            _LOGGER.debug("Encoded schedule: %s", raw_schedule)
-            await self.__api.set_schedule_slots(raw_schedule)
-            self.hass.async_create_task(self.async_request_refresh())
+            async with self.runtime.coordinator_lock:
+                current = await self.__api.get_schedule()
+                raw_schedule = BatterySchedule.encode_schedule(
+                    slots,
+                    pin=current["raw"].get("Pin", 0),
+                    pout=current["raw"].get("Pout", 0),
+                )
+                _LOGGER.debug("Encoded schedule: %s", raw_schedule)
+                await self.__api.set_schedule_slots(raw_schedule)
+            self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
     async def set_battery_schedule_power(self, pin: int | None = None, pout: int | None = None) -> None:
         """Set battery schedule power settings."""
         try:
-            await self.__api.set_schedule_power(pin, pout)
-            self.hass.async_create_task(self.async_request_refresh())
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_schedule_power(pin, pout)
+            self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
     async def set_battery_schedule_pin(self, sn: str, pin: int) -> None:
         """Set battery schedule pin."""
         try:
-            await self.__api.set_schedule_pin(pin)
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_schedule_pin(pin)
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
 
     async def set_battery_schedule_pout(self, sn: str, pout: int) -> None:
         """Set battery schedule pout."""
         try:
-            await self.__api.set_schedule_pout(pout)
+            async with self.runtime.coordinator_lock:
+                await self.__api.set_schedule_pout(pout)
+            await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
             raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+
+
+def _legacy_meter_payload_looks_valid(meter_data: object) -> bool:
+    """Return whether legacy meter data is real rather than a zero-filled stub."""
+    if meter_data is None:
+        return False
+
+    timestamp = getattr(meter_data, "tim", None)
+    if isinstance(timestamp, str) and timestamp.strip():
+        return True
+
+    return any(
+        isinstance(value := getattr(meter_data, attribute, None), int | float) and value != 0
+        for attribute in ("pac", "itd", "otd", "iet", "oet")
+    )
+
+
+class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
+    """Poll device inventory, settings, and other slowly changing data."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the hourly metadata coordinator."""
+        self._new_device_ids: dict[str, set[str]] = {}
+        super().__init__(
+            hass,
+            runtime,
+            config_entry,
+            name="metadata",
+            update_interval=METADATA_UPDATE_INTERVAL,
+            error_interval=METADATA_UPDATE_INTERVAL,
+        )
+
+    async def _async_update_data(self) -> SolplanetData:
+        """Refresh metadata, then announce devices first seen by this update."""
+        data = await super()._async_update_data()
+
+        coordinators = {
+            INVERTER_IDENTIFIER: self.runtime.inverter_coordinator,
+            BATTERY_IDENTIFIER: self.runtime.battery_coordinator,
+            METER_IDENTIFIER: self.runtime.meter_coordinator,
+            DONGLE_IDENTIFIER: self.runtime.dongle_coordinator,
+        }
+        for device_type, device_ids in self._new_device_ids.items():
+            if coordinator := coordinators[device_type]:
+                await coordinator.async_refresh()
+            async_dispatcher_send(
+                self.hass,
+                DISCOVERY_SIGNAL,
+                self.config_entry_id,
+                device_type,
+                device_ids,
+            )
+
+        self._new_device_ids = {}
+        return data
+
+    async def _async_update_runtime_data(self) -> None:
+        """Refresh inventory and configuration data."""
+        previous_ids = {device_type: set(devices) for device_type, devices in self.runtime.data.items()}
+        inverter_info = await self.api.get_inverter_info()
+        if not inverter_info.inv:
+            raise RuntimeError("No inverters returned by the inventory endpoint")
+
+        if self.api.version == "v2":
+            await self._async_update_dongle_metadata()
+
+        await self._async_update_inverter_metadata(inverter_info.inv)
+        await self._async_update_battery_metadata(inverter_info.inv)
+        await self._async_update_meter_metadata(inverter_info.inv)
+        self._new_device_ids = {
+            device_type: set(devices) - previous_ids[device_type]
+            for device_type, devices in self.runtime.data.items()
+            if set(devices) - previous_ids[device_type]
+        }
+
+    async def _async_update_dongle_metadata(self) -> None:
+        """Refresh dongle identity and network information."""
+        previous = self.runtime.data[DONGLE_IDENTIFIER]
+        try:
+            dongle_info = await self.api.client.get("getdev.cgi")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed fetching dongle metadata: %s", err, exc_info=True)
+            return
+        if not isinstance(dongle_info, dict):
+            _LOGGER.debug("Ignoring unexpected dongle metadata: %r", dongle_info)
+            return
+
+        dongle_id = (
+            dongle_info.get("psn") or dongle_info.get("ethmac") or dongle_info.get("wlanmac") or "unknown"
+        )
+        previous_entry = previous.get(dongle_id, {})
+
+        try:
+            network_info = await self.api.client.get("wlanget.cgi?info=2")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed fetching dongle network info: %s", err, exc_info=True)
+            network_info = previous_entry.get("network")
+
+        self.runtime.data[DONGLE_IDENTIFIER] = {
+            dongle_id: {
+                "data": dongle_info,
+                "network": network_info,
+                "warnings": previous_entry.get("warnings"),
+            }
+        }
+
+    async def _async_update_inverter_metadata(self, inverter_info: list[Any]) -> None:
+        """Refresh inverter inventory and configuration."""
+        previous = self.runtime.data[INVERTER_IDENTIFIER]
+        power_on: bool | None = None
+
+        try:
+            power_register = await self.api.modbus_read_holding_registers(
+                data_type=DataType.U16,
+                device_address=3,
+                register_address=40201,
+                register_count=1,
+            )
+            if isinstance(power_register, list):
+                power_register = power_register[0] if power_register else None
+            if isinstance(power_register, int):
+                power_on = power_register == 1
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed reading inverter power setting: %s", err, exc_info=True)
+
+        updated: dict[str, dict[str, Any]] = {}
+        for info in inverter_info:
+            if not info.isn:
+                continue
+            entry = dict(previous.get(info.isn, {}))
+            entry.setdefault("data", None)
+            entry["info"] = info
+            if power_on is not None:
+                entry["more_settings"] = {"power_on": power_on}
+            else:
+                entry.setdefault("more_settings", {})
+            updated[info.isn] = entry
+
+        self.runtime.data[INVERTER_IDENTIFIER] = updated
+
+    async def _async_update_battery_metadata(self, inverter_info: list[Any]) -> None:
+        """Refresh battery inventory, schedule, and configuration."""
+        if self.api.version != "v2":
+            self.runtime.data[BATTERY_IDENTIFIER] = {}
+            return
+
+        battery_ids = [info.isn for info in inverter_info if info.isn and info.isStorage()]
+        previous = self.runtime.data[BATTERY_IDENTIFIER]
+        if not battery_ids:
+            self.runtime.data[BATTERY_IDENTIFIER] = {}
+            return
+
+        schedule: dict[str, Any] | None = None
+        try:
+            schedule = await self.api.get_schedule()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed fetching battery schedule: %s", err, exc_info=True)
+
+        more_settings: dict[str, Any] | None = None
+        try:
+            registers = await self.api.modbus_read_holding_registers(
+                data_type=DataType.U16,
+                device_address=3,
+                register_address=41501,
+                register_count=4,
+            )
+            if isinstance(registers, list) and len(registers) >= 4:
+                more_settings = {
+                    "power_on": int(registers[0] or 0) == 1,
+                    "sleep_enabled": int(registers[1] or 0) == 0,
+                    "led_color_index": int(registers[2] or 0),
+                    "led_brightness": int(registers[3] or 0),
+                }
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed reading battery settings: %s", err, exc_info=True)
+
+        updated: dict[str, dict[str, Any]] = {}
+        for battery_id in battery_ids:
+            previous_entry = previous.get(battery_id, {})
+            entry = dict(previous_entry)
+            entry.setdefault("data", None)
+
+            try:
+                info = await self.api.get_battery_info(battery_id)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Failed fetching battery metadata for %s: %s",
+                    battery_id,
+                    err,
+                    exc_info=True,
+                )
+                info = previous_entry.get("info")
+
+            entry["info"] = info
+            if info is not None:
+                entry["work_modes"] = {
+                    "all": BatteryWorkModes().get_all_modes(info.type, info.mod_r),
+                    "selected": BatteryWorkModes().get_mode(info.type, info.mod_r),
+                }
+            else:
+                entry.setdefault("work_modes", {"all": [], "selected": None})
+
+            if schedule is not None:
+                entry["schedule"] = schedule
+            else:
+                entry.setdefault("schedule", {})
+
+            if more_settings is not None:
+                entry["more_settings"] = more_settings
+            else:
+                entry.setdefault("more_settings", {})
+
+            updated[battery_id] = entry
+
+        self.runtime.data[BATTERY_IDENTIFIER] = updated
+
+    async def _async_update_meter_metadata(self, inverter_info: list[Any]) -> None:
+        """Refresh meter inventory and its power-limit configuration."""
+        previous = self.runtime.data[METER_IDENTIFIER]
+
+        if self.api.version == "v2":
+            app_meters = await self._async_get_app_meter_inventory(previous)
+            if app_meters is not None:
+                self.runtime.data[METER_IDENTIFIER] = app_meters
+                return
+
+        await self._async_update_legacy_meter_metadata(inverter_info, previous)
+
+    async def _async_get_app_meter_inventory(
+        self, previous: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]] | None:
+        """Return app-protocol meter inventory, or None when unsupported/empty."""
+        try:
+            response = await self.api.client.post(
+                "getting.cgi",
+                {"cmd": "get_app_dev_info_req", "payload": {"type": [4]}},
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("App meter inventory is unavailable: %s", err, exc_info=True)
+            return None
+
+        if not isinstance(response, dict) or response.get("status") != 200:
+            return None
+
+        payload = response.get("payload") or {}
+        main_meters = payload.get("mainMeter") or []
+        sub_meters = payload.get("subMeter") or []
+        meter_records = [meter for meter in [*main_meters, *sub_meters] if isinstance(meter, dict)]
+        if not meter_records:
+            return None
+
+        primary_id = main_meters[0].get("sn") if main_meters and isinstance(main_meters[0], dict) else None
+        updated: dict[str, dict[str, Any]] = {}
+
+        for meter in meter_records:
+            meter_id = meter.get("sn") or f"addr_{meter.get('address')}"
+            entry = dict(previous.get(meter_id, {}))
+            entry["app_info"] = meter
+            updated[meter_id] = entry
+
+        target_id = primary_id or next(iter(updated))
+        updated[target_id].setdefault("app_data", None)
+
+        try:
+            response = await self.api.client.post("getting.cgi", {"cmd": "get_meter_req"})
+            if isinstance(response, dict) and response.get("status") == 200:
+                updated[target_id]["meter_req"] = response.get("payload") or {}
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed fetching meter configuration: %s", err, exc_info=True)
+
+        return updated
+
+    async def _async_update_legacy_meter_metadata(
+        self,
+        inverter_info: list[Any],
+        previous: dict[str, dict[str, Any]],
+    ) -> None:
+        """Refresh V1 or fallback V2 meter metadata."""
+        fallback_id = next((info.isn for info in inverter_info if info.isn), None)
+        try:
+            info = await self.api.get_meter_info()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed fetching legacy meter metadata: %s", err, exc_info=True)
+            return
+
+        meter_id = info.sn or fallback_id
+        if meter_id is None:
+            return
+
+        previous_entry = previous.get(meter_id)
+        entry = dict(previous_entry or {})
+        entry["info"] = info
+
+        # Probe live data only when discovering a legacy meter. Subsequent live
+        # reads belong exclusively to SolplanetMeterUpdateCoordinator.
+        if previous_entry is None:
+            try:
+                data = await self.api.get_meter_data()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Failed probing legacy meter data: %s", err, exc_info=True)
+                return
+            if self.api.version == "v2" and not _legacy_meter_payload_looks_valid(data):
+                return
+            entry["data"] = data
+        else:
+            entry.setdefault("data", None)
+
+        self.runtime.data[METER_IDENTIFIER] = {meter_id: entry}
+
+
+class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
+    """Poll live inverter telemetry."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+        update_interval: timedelta,
+    ) -> None:
+        """Initialize the inverter coordinator."""
+        super().__init__(
+            hass,
+            runtime,
+            config_entry,
+            name="inverter",
+            update_interval=update_interval,
+        )
+
+    async def _async_update_runtime_data(self) -> None:
+        """Refresh live telemetry for all discovered inverters."""
+        entries = self.runtime.data[INVERTER_IDENTIFIER]
+        successful_updates = 0
+        failed_device_ids: set[str] = set()
+        last_error: Exception | None = None
+
+        for inverter_id, entry in entries.items():
+            try:
+                entry["data"] = await self.api.get_inverter_data(inverter_id)
+            except Exception as err:  # noqa: BLE001
+                failed_device_ids.add(inverter_id)
+                last_error = err
+                _LOGGER.debug(
+                    "Failed fetching inverter data for %s: %s",
+                    inverter_id,
+                    err,
+                    exc_info=True,
+                )
+            else:
+                successful_updates += 1
+
+        self.failed_device_ids = failed_device_ids
+        if entries and successful_updates == 0:
+            raise last_error or RuntimeError("No inverter data returned")
+
+
+class SolplanetBatteryUpdateCoordinator(SolplanetDataUpdateCoordinator):
+    """Poll live battery telemetry."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+        update_interval: timedelta,
+    ) -> None:
+        """Initialize the battery coordinator."""
+        super().__init__(
+            hass,
+            runtime,
+            config_entry,
+            name="battery",
+            update_interval=update_interval,
+        )
+        self._zero_filled_update_count = 0
+
+    async def _async_update_runtime_data(self) -> None:
+        """Refresh live telemetry for all discovered batteries."""
+        entries = self.runtime.data[BATTERY_IDENTIFIER]
+        successful_updates = 0
+        zero_filled_updates = 0
+        failed_device_ids: set[str] = set()
+        last_error: Exception | None = None
+
+        for battery_id, entry in entries.items():
+            try:
+                data = await self.api.get_battery_data(battery_id)
+                if is_zero_filled_battery_payload(data):
+                    zero_filled_updates += 1
+                    _LOGGER.debug(
+                        "Ignoring transient zero-filled battery data for %s",
+                        battery_id,
+                    )
+                    continue
+                entry["data"] = data
+            except Exception as err:  # noqa: BLE001
+                failed_device_ids.add(battery_id)
+                last_error = err
+                _LOGGER.debug(
+                    "Failed fetching battery data for %s: %s",
+                    battery_id,
+                    err,
+                    exc_info=True,
+                )
+            else:
+                successful_updates += 1
+
+        self.failed_device_ids = failed_device_ids
+        if successful_updates:
+            if self._zero_filled_update_count:
+                self._zero_filled_update_count = 0
+                self.update_interval = self._default_interval
+            return
+
+        if zero_filled_updates:
+            self._zero_filled_update_count += 1
+            if self._zero_filled_update_count == MAX_FAILED_UPDATES:
+                self.update_interval = self._error_interval
+            return
+
+        if entries and successful_updates == 0:
+            raise last_error or RuntimeError("No battery data returned")
+
+
+class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
+    """Poll live meter telemetry."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+        update_interval: timedelta,
+    ) -> None:
+        """Initialize the meter coordinator."""
+        super().__init__(
+            hass,
+            runtime,
+            config_entry,
+            name="meter",
+            update_interval=update_interval,
+        )
+
+    async def _async_update_runtime_data(self) -> None:
+        """Refresh app-protocol or legacy meter telemetry."""
+        entries = self.runtime.data[METER_IDENTIFIER]
+        app_meter_ids = [meter_id for meter_id, entry in entries.items() if "app_info" in entry]
+
+        if app_meter_ids:
+            response = await self.api.client.post("getting.cgi", {"cmd": "get_meter_data_req"})
+            if not isinstance(response, dict) or response.get("status") != 200:
+                raise RuntimeError(f"Unexpected get_meter_data response: {response}")
+            target_id = next(
+                (meter_id for meter_id in app_meter_ids if "app_data" in entries[meter_id]),
+                app_meter_ids[0],
+            )
+            entries[target_id]["app_data"] = response.get("payload") or {}
+            return
+
+        if not entries:
+            return
+
+        data = await self.api.get_meter_data()
+        if self.api.version == "v2" and not _legacy_meter_payload_looks_valid(data):
+            raise RuntimeError("legacy meter returned an empty or zero-filled payload")
+        next(iter(entries.values()))["data"] = data
+
+
+class SolplanetDongleUpdateCoordinator(SolplanetDataUpdateCoordinator):
+    """Poll changing dongle diagnostics separately from static metadata."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        runtime: SolplanetRuntimeData,
+        config_entry: ConfigEntry,
+        update_interval: timedelta,
+    ) -> None:
+        """Initialize the dongle diagnostics coordinator."""
+        super().__init__(
+            hass,
+            runtime,
+            config_entry,
+            name="dongle",
+            update_interval=update_interval,
+        )
+
+    async def _async_update_runtime_data(self) -> None:
+        """Refresh dongle warnings; HTTP 404 means there are no warnings."""
+        entries = self.runtime.data[DONGLE_IDENTIFIER]
+        if not entries:
+            return
+
+        try:
+            warnings = await self.api.client.get("getdevdata.cgi?device=1")
+        except ClientResponseError as err:
+            if err.status != 404:
+                raise
+            warnings = {}
+
+        next(iter(entries.values()))["warnings"] = warnings

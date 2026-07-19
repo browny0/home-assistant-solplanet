@@ -1,8 +1,8 @@
 """Solplanet sensors platform."""
 
+import logging
 from collections import abc
 from dataclasses import dataclass
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -24,7 +24,8 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -42,17 +43,18 @@ from .const import (
     BATTERY_WARNINGS_2,
     BATTERY_WARNINGS_3,
     BATTERY_WARNINGS_4,
+    DISCOVERY_SIGNAL,
     DONGLE_IDENTIFIER,
-    DOMAIN,
     INVERTER_ERROR_CODES,
     INVERTER_IDENTIFIER,
     INVERTER_STATUS,
     METER_IDENTIFIER,
 )
 from .coordinator import SolplanetDataUpdateCoordinator
-from .entity import SolplanetEntity, SolplanetEntityDescription
+from .entity import SolplanetEntity, SolplanetEntityDescription, get_entity_unique_id
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -282,7 +284,9 @@ def create_inverter_entities_description(
             ]
         )
 
-    data: GetInverterDataResponse = coordinator.data[INVERTER_IDENTIFIER][isn]["data"]
+    data: GetInverterDataResponse | None = coordinator.data[INVERTER_IDENTIFIER][isn]["data"]
+    if data is None:
+        return sensors
 
     for i in range(len(data.vac or [])):
         sensors.extend(
@@ -488,46 +492,45 @@ def create_meter_entities_description(
             ),
         ]
 
-        # Diagnostic: power limit control status/type (based on get_meter_req payload)
-        if meter_entry.get("meter_req") is not None:
+        # Always create the diagnostic entity. A transient configuration read
+        # during setup should yield Unknown, not permanently omit the entity.
+        def _power_limit_control(req: Any) -> str | None:
+            if not isinstance(req, dict):
+                return None
+            regulate = req.get("regulate")
+            try:
+                regulate_i = int(regulate)
+            except (TypeError, ValueError):
+                regulate_i = None
 
-            def _power_limit_control(req: Any) -> str | None:
-                if not isinstance(req, dict):
-                    return None
-                regulate = req.get("regulate")
-                try:
-                    regulate_i = int(regulate)
-                except (TypeError, ValueError):
-                    regulate_i = None
+            if regulate_i != 10:
+                return "Disabled"
 
-                if regulate_i != 10:
-                    return "Disabled"
+            ctrl = req.get("ctrlType")
+            try:
+                ctrl_i = int(ctrl)
+            except (TypeError, ValueError):
+                ctrl_i = None
 
-                ctrl = req.get("ctrlType")
-                try:
-                    ctrl_i = int(ctrl)
-                except (TypeError, ValueError):
-                    ctrl_i = None
+            return {
+                0: "Limit power",
+                1: "Limit current",
+                2: "Zero power",
+            }.get(ctrl_i, "Enabled (unknown type)")
 
-                return {
-                    0: "Limit power",
-                    1: "Limit current",
-                    2: "Zero power",
-                }.get(ctrl_i, "Enabled (unknown type)")
-
-            sensors.append(
-                SolplanetSensorEntityDescription(
-                    key=f"{isn}_power_limit_control",
-                    name="Power limit control",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                    data_field_device_type=METER_IDENTIFIER,
-                    data_field_data_type="meter_req",
-                    data_field_path=[],
-                    device_class=SensorDeviceClass.ENUM,
-                    data_field_value_mapper=_power_limit_control,
-                    unique_id_suffix="power_limit_control",
-                )
+        sensors.append(
+            SolplanetSensorEntityDescription(
+                key=f"{isn}_power_limit_control",
+                name="Power limit control",
+                entity_category=EntityCategory.DIAGNOSTIC,
+                data_field_device_type=METER_IDENTIFIER,
+                data_field_data_type="meter_req",
+                data_field_path=[],
+                device_class=SensorDeviceClass.ENUM,
+                data_field_value_mapper=_power_limit_control,
+                unique_id_suffix="power_limit_control",
             )
+        )
 
         return sensors
 
@@ -1043,49 +1046,75 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensors for Solplanet Inverter from a config entry."""
-    coordinator: SolplanetDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
-    sensors: list[SolplanetSensor] = []
+    description_factories = {
+        DONGLE_IDENTIFIER: create_dongle_entities_description,
+        INVERTER_IDENTIFIER: create_inverter_entities_description,
+        BATTERY_IDENTIFIER: create_battery_entities_description,
+        METER_IDENTIFIER: create_meter_entities_description,
+    }
+    known_unique_ids: set[str] = set()
 
-    for dongle_id in coordinator.data.get(DONGLE_IDENTIFIER, {}):
-        sensors.extend(
-            SolplanetSensor(
-                description=entity_description,
-                isn=dongle_id,
-                coordinator=coordinator,
-            )
-            for entity_description in create_dongle_entities_description(coordinator, dongle_id)
+    def _create_sensors(device_type: str, device_ids: set[str]) -> list[SolplanetSensor]:
+        factory = description_factories[device_type]
+        new_sensors: list[SolplanetSensor] = []
+        for device_id in device_ids:
+            for description in factory(coordinator, device_id):
+                unique_id = get_entity_unique_id(description, device_id)
+                if unique_id in known_unique_ids:
+                    continue
+                sensor = SolplanetSensor(
+                    description=description,
+                    isn=device_id,
+                    coordinator=coordinator,
+                )
+                known_unique_ids.add(unique_id)
+                new_sensors.append(sensor)
+        return new_sensors
+
+    sensors = [
+        sensor
+        for device_type in description_factories
+        for sensor in _create_sensors(device_type, set(coordinator.data[device_type]))
+    ]
+
+    @callback
+    def _async_add_discovered_sensors(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add sensors for devices found by an hourly metadata refresh."""
+        if config_entry_id != entry.entry_id or device_type not in description_factories:
+            return
+        async_add_entities(_create_sensors(device_type, device_ids))
+
+    @callback
+    def _async_add_metadata_descriptions() -> None:
+        """Add entities for capabilities that appeared after setup."""
+        new_sensors = [
+            sensor
+            for device_type in description_factories
+            for sensor in _create_sensors(device_type, set(coordinator.data[device_type]))
+        ]
+        if new_sensors:
+            async_add_entities(new_sensors)
+
+    @callback
+    def _async_add_inverter_descriptions() -> None:
+        """Add phase and MPPT entities once live data exposes their dimensions."""
+        new_sensors = _create_sensors(
+            INVERTER_IDENTIFIER,
+            set(coordinator.data[INVERTER_IDENTIFIER]),
         )
+        if new_sensors:
+            async_add_entities(new_sensors)
 
-    for isn in coordinator.data[INVERTER_IDENTIFIER]:
-        sensors.extend(
-            SolplanetSensor(
-                description=entity_description,
-                isn=isn,
-                coordinator=coordinator,
-            )
-            for entity_description in create_inverter_entities_description(coordinator, isn)
-        )
-
-    for isn in coordinator.data[BATTERY_IDENTIFIER]:
-        sensors.extend(
-            SolplanetSensor(
-                description=entity_description,
-                isn=isn,
-                coordinator=coordinator,
-            )
-            for entity_description in create_battery_entities_description(coordinator, isn)
-        )
-
-    for isn in coordinator.data[METER_IDENTIFIER]:
-        sensors.extend(
-            SolplanetSensor(
-                description=entity_description,
-                isn=isn,
-                coordinator=coordinator,
-            )
-            for entity_description in create_meter_entities_description(coordinator, isn)
-        )
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_sensors))
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_metadata_descriptions))
+    if inverter_coordinator := entry.runtime_data.inverter_coordinator:
+        entry.async_on_unload(inverter_coordinator.async_add_listener(_async_add_inverter_descriptions))
 
     # Always add entities. If the inverter is slow/sleeping at startup, filtering here would
     # permanently prevent entities from being created.

@@ -23,7 +23,7 @@ Some dongles hide their access point after joining your home Wi-Fi. This does no
 
 ## Data Is Slow Or Occasionally Missing
 
-The default update interval is 60 seconds. Each update reads several endpoints in sequence, so a busy or slow dongle can take longer than the configured interval.
+The live data update interval defaults to 60 seconds. Inverter, battery, meter, and dongle-warning data have separate pollers, while device inventory and settings refresh hourly. All of the integration's requests share one queue so the dongle receives only one request at a time. A slow request can therefore delay another poller, and related entities may update at slightly different times.
 
 - Keep the default interval while diagnosing the problem.
 - Remove duplicate REST sensors or other software polling the dongle.
@@ -32,7 +32,9 @@ The default update interval is 60 seconds. Each update reads several endpoints i
 - If the **Reboot** button is available, restart the dongle only after allowing a normal update to finish.
 - Review **Settings > System > Logs** and search for `solplanet`.
 
-An individual value may show `unknown` while an inverter or battery is sleeping. If the integration cannot complete an update, its entities become unavailable until communication recovers.
+An individual value may show `unknown` while its device is sleeping or that field is absent from an otherwise successful response. If one inverter or battery fails while its peers update, only that device's live entities become unavailable. If an entire endpoint family fails, all entities supplied by that poller become unavailable, while the other pollers continue updating. They recover automatically after a successful response.
+
+After three consecutive full failures, the affected live-data poller waits at least 10 minutes between attempts instead of repeatedly loading an unresponsive dongle. It returns to your configured interval as soon as an update succeeds. Transient all-zero battery responses are ignored so they do not replace the last valid readings. If every battery response is all-zero for three consecutive updates, the battery poller uses the same backoff.
 
 ## An Action Fails
 

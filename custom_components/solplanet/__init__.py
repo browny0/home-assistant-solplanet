@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, Platform
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_adapter import SolplanetApiAdapter
 from .client import SolplanetClient
@@ -24,10 +25,19 @@ from .const import (
     DONGLE_IDENTIFIER,
     INVERTER_IDENTIFIER,
     MANUFACTURER,
+    MAX_INTERVAL,
     METER_IDENTIFIER,
     METER_MODEL_NAMES,
+    MIN_INTERVAL,
 )
-from .coordinator import SolplanetDataUpdateCoordinator
+from .coordinator import (
+    SolplanetBatteryUpdateCoordinator,
+    SolplanetDongleUpdateCoordinator,
+    SolplanetInverterUpdateCoordinator,
+    SolplanetMetadataUpdateCoordinator,
+    SolplanetMeterUpdateCoordinator,
+    SolplanetRuntimeData,
+)
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [
@@ -41,7 +51,104 @@ PLATFORMS: list[Platform] = [
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
 
-type SolplanetConfigEntry = ConfigEntry[SolplanetApiAdapter]
+type SolplanetConfigEntry = ConfigEntry[SolplanetRuntimeData]
+
+
+@callback
+def _register_devices(
+    device_registry: dr.DeviceRegistry,
+    entry: SolplanetConfigEntry,
+) -> None:
+    """Create or update device-registry entries from the metadata cache."""
+    data = entry.runtime_data.data
+
+    for dongle_id, dongle_entry in data[DONGLE_IDENTIFIER].items():
+        dongle = dongle_entry.get("data", {}) or {}
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"{DONGLE_IDENTIFIER}_{dongle_id}")},
+            name=dongle.get("nam") or "Solplanet Dongle",
+            manufacturer=dongle.get("brd") or dongle.get("muf") or MANUFACTURER,
+            model=dongle.get("mod") or dongle.get("hw") or "Dongle",
+            serial_number=dongle.get("psn") or dongle_id,
+            hw_version=dongle.get("hw") or "",
+            sw_version=dongle.get("sw") or "",
+        )
+
+    for inverter_entry in data[INVERTER_IDENTIFIER].values():
+        inverter_info = inverter_entry["info"]
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, inverter_info.isn or "")},
+            name=inverter_info.model,
+            model=inverter_info.model,
+            manufacturer=MANUFACTURER,
+            serial_number=inverter_info.isn,
+            sw_version=(
+                f"Master: {inverter_info.msw}, Slave: {inverter_info.ssw}, Security: {inverter_info.tsw}"
+            ),
+        )
+
+    for battery_entry in data[BATTERY_IDENTIFIER].values():
+        battery_info = battery_entry.get("info")
+        if battery_info is None:
+            continue
+
+        battery_serial = (
+            battery_info.battery.partno
+            if battery_info.battery and battery_info.battery.partno
+            else battery_info.isn
+        )
+        battery_manufacturer = (
+            BATTERY_MANUFACTURER_NAMES.get(battery_info.muf) if battery_info.muf is not None else None
+        )
+        battery_model = (
+            BATTERY_MODEL_NAMES.get((battery_info.muf, battery_info.mod))
+            if battery_info.muf is not None and battery_info.mod is not None
+            else None
+        )
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"{BATTERY_IDENTIFIER}_{battery_info.isn or ''}")},
+            name=battery_model or "Battery",
+            manufacturer=battery_manufacturer,
+            model=battery_model,
+            serial_number=battery_serial,
+            sw_version=battery_info.battery.softwarever if battery_info.battery else "",
+            hw_version=battery_info.battery.hardwarever if battery_info.battery else "",
+        )
+
+    for meter_id, meter_entry in data[METER_IDENTIFIER].items():
+        meter_info = meter_entry.get("info")
+        app_info = meter_entry.get("app_info")
+
+        if isinstance(app_info, dict):
+            equip_model_raw = app_info.get("equipModel")
+            equip_model = (
+                int(equip_model_raw)
+                if isinstance(equip_model_raw, int | str) and str(equip_model_raw).isdigit()
+                else None
+            )
+            model_name = (
+                METER_MODEL_NAMES.get(equip_model) if equip_model is not None and equip_model != 255 else None
+            )
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_id or ''}")},
+                name=model_name or "Meter",
+                serial_number=app_info.get("sn") or meter_id,
+                manufacturer=MANUFACTURER,
+                model=model_name or "",
+            )
+        elif meter_info is not None:
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_id or ''}")},
+                name="Energy meter",
+                serial_number=meter_info.sn,
+                manufacturer=meter_info.manufactory,
+                model=meter_info.name,
+            )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -66,132 +173,61 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) ->
         raise ConfigEntryNotReady(str(e)) from e
 
     _LOGGER.info("Using Solplanet protocol version: %s", api.version)
-    entry.runtime_data = api
-
-    hass.data[DOMAIN][entry.entry_id] = {
-        "api": api,
-    }
 
     device_registry = dr.async_get(hass)
-
-    coordinator = SolplanetDataUpdateCoordinator(
+    runtime = SolplanetRuntimeData(api)
+    coordinator = SolplanetMetadataUpdateCoordinator(
         hass=hass,
-        api=api,
-        config_entry_id=entry.entry_id,
-        update_interval=entry.data[CONF_INTERVAL],
+        runtime=runtime,
+        config_entry=entry,
     )
-    hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    runtime.metadata_coordinator = coordinator
     await coordinator.async_config_entry_first_refresh()
 
-    # Dongle (V2 only): create a dedicated device entry for diagnostics and actions.
-    for dongle_id in coordinator.data.get(DONGLE_IDENTIFIER, {}):
-        dongle = coordinator.data[DONGLE_IDENTIFIER][dongle_id].get("data", {}) or {}
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, f"{DONGLE_IDENTIFIER}_{dongle_id}")},
-            name=dongle.get("nam") or "Solplanet Dongle",
-            manufacturer=dongle.get("brd") or dongle.get("muf") or MANUFACTURER,
-            model=dongle.get("mod") or dongle.get("hw") or "Dongle",
-            serial_number=dongle.get("psn") or dongle_id,
-            hw_version=dongle.get("hw") or "",
-            sw_version=dongle.get("sw") or "",
-        )
+    configured_interval = int(entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL))
+    live_interval = timedelta(seconds=max(MIN_INTERVAL, min(configured_interval, MAX_INTERVAL)))
 
-    for inverter_isn in coordinator.data[INVERTER_IDENTIFIER]:
-        inverter_info = coordinator.data[INVERTER_IDENTIFIER][inverter_isn]["info"]
+    runtime.inverter_coordinator = SolplanetInverterUpdateCoordinator(
+        hass,
+        runtime,
+        entry,
+        live_interval,
+    )
+    await runtime.inverter_coordinator.async_refresh()
 
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, inverter_info.isn or "")},
-            name=inverter_info.model,
-            model=inverter_info.model,
-            manufacturer=MANUFACTURER,
-            serial_number=inverter_info.isn,
-            sw_version=f"Master: {inverter_info.msw}, Slave: {inverter_info.ssw}, Security: {inverter_info.tsw}",
-        )
+    runtime.battery_coordinator = SolplanetBatteryUpdateCoordinator(
+        hass,
+        runtime,
+        entry,
+        live_interval,
+    )
+    await runtime.battery_coordinator.async_refresh()
 
-    for battery_isn in coordinator.data[BATTERY_IDENTIFIER]:
-        battery_info = coordinator.data[BATTERY_IDENTIFIER][battery_isn]["info"]
+    runtime.meter_coordinator = SolplanetMeterUpdateCoordinator(
+        hass,
+        runtime,
+        entry,
+        live_interval,
+    )
+    await runtime.meter_coordinator.async_refresh()
 
-        if battery_info is None:
-            # Info unavailable (battery unreachable on first refresh); skip device creation.
-            # The device will be registered on the next successful update cycle.
-            continue
+    runtime.dongle_coordinator = SolplanetDongleUpdateCoordinator(
+        hass,
+        runtime,
+        entry,
+        live_interval,
+    )
+    await runtime.dongle_coordinator.async_refresh()
 
-        # Battery endpoint (device=4) reports `isn` as the inverter serial.
-        # Use the nested battery part number as the battery serial when available.
-        battery_serial = (
-            battery_info.battery.partno
-            if battery_info.battery and battery_info.battery.partno
-            else battery_info.isn
-        )
+    entry.runtime_data = runtime
+    hass.data[DOMAIN][entry.entry_id] = runtime
 
-        battery_manufacturer = (
-            BATTERY_MANUFACTURER_NAMES.get(battery_info.muf) if battery_info.muf is not None else None
-        )
-        battery_model = (
-            BATTERY_MODEL_NAMES.get((battery_info.muf, battery_info.mod))
-            if battery_info.muf is not None and battery_info.mod is not None
-            else None
-        )
+    @callback
+    def _async_register_devices() -> None:
+        _register_devices(device_registry, entry)
 
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            # Keep identifiers stable (and aligned with `device_info`) to avoid orphaning entities.
-            identifiers={(DOMAIN, f"{BATTERY_IDENTIFIER}_{battery_info.isn or ''}")},
-            name=battery_model or "Battery",
-            manufacturer=battery_manufacturer,
-            model=battery_model,
-            serial_number=battery_serial,
-            sw_version=battery_info.battery.softwarever if battery_info.battery else "",
-            hw_version=battery_info.battery.hardwarever if battery_info.battery else "",
-        )
-
-    for meter_isn in coordinator.data[METER_IDENTIFIER]:
-        meter_entry = coordinator.data[METER_IDENTIFIER][meter_isn]
-        meter_info = meter_entry.get("info") if isinstance(meter_entry, dict) else None
-        app_info = meter_entry.get("app_info") if isinstance(meter_entry, dict) else None
-
-        # V2 meters discovered via `getting.cgi`
-        if isinstance(app_info, dict):
-            # from assets/meter.json
-            serial = app_info.get("sn") or meter_isn
-
-            equip_model_raw = app_info.get("equipModel")
-            equip_model = (
-                int(equip_model_raw)
-                if isinstance(equip_model_raw, int | str) and str(equip_model_raw).isdigit()
-                else None
-            )
-            model_name = METER_MODEL_NAMES.get(equip_model) if equip_model is not None else None
-
-            # Some firmwares report equipModel=255 as "None".
-            if equip_model == 255:
-                model_name = None
-
-            name_prefix = model_name or "Meter"
-            name = name_prefix
-
-            device_registry.async_get_or_create(
-                config_entry_id=entry.entry_id,
-                identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_isn or ''}")},
-                name=name,
-                serial_number=serial,
-                manufacturer=MANUFACTURER,
-                model=model_name or "",
-            )
-            continue
-
-        # V1/V2 legacy meter info
-        if meter_info is not None:
-            device_registry.async_get_or_create(
-                config_entry_id=entry.entry_id,
-                identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_isn or ''}")},
-                name="Energy meter",
-                serial_number=meter_info.sn,
-                manufacturer=meter_info.manufactory,
-                model=meter_info.name,
-            )
+    _async_register_devices()
+    entry.async_on_unload(coordinator.async_add_listener(_async_register_devices))
 
     # Do not block setup if the inverter is sleeping or temporarily unreachable.
     # Entities are added regardless and will show `unknown` state until data is available.

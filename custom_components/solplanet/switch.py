@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
-from .const import BATTERY_IDENTIFIER, DOMAIN, INVERTER_IDENTIFIER
-from .coordinator import SolplanetDataUpdateCoordinator
+from .const import BATTERY_IDENTIFIER, DISCOVERY_SIGNAL, INVERTER_IDENTIFIER
 from .entity import SolplanetEntity, SolplanetEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 # Battery "More Settings" are controlled via Modbus RTU over `fdbg.cgi` using holding-register offsets:
 # 1500 power, 1501 sleep flag, 1502 LED color, 1503 LED brightness.
@@ -39,7 +40,8 @@ class SolplanetSwitch(SolplanetEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         """Return true if the switch is on."""
         try:
-            return bool(self._get_value_from_coordinator())
+            value = self._get_value_from_coordinator()
+            return None if value is None else bool(value)
         except Exception:  # noqa: BLE001
             return None
 
@@ -108,16 +110,42 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up switches for Solplanet from a config entry."""
-    coordinator: SolplanetDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
-    switches: list[SolplanetSwitch] = []
+    description_factories = {
+        INVERTER_IDENTIFIER: create_inverter_switches,
+        BATTERY_IDENTIFIER: create_battery_switches,
+    }
+    known_device_ids = {
+        device_type: set(coordinator.data[device_type]) for device_type in description_factories
+    }
 
-    for isn in coordinator.data.get(INVERTER_IDENTIFIER, {}):
-        for description in create_inverter_switches(isn):
-            switches.append(SolplanetSwitch(description=description, isn=isn, coordinator=coordinator))
+    def _create_switches(device_type: str, device_ids: set[str]) -> list[SolplanetSwitch]:
+        factory = description_factories[device_type]
+        return [
+            SolplanetSwitch(description=description, isn=device_id, coordinator=coordinator)
+            for device_id in device_ids
+            for description in factory(device_id)
+        ]
 
-    for isn in coordinator.data.get(BATTERY_IDENTIFIER, {}):
-        for description in create_battery_switches(isn):
-            switches.append(SolplanetSwitch(description=description, isn=isn, coordinator=coordinator))
+    @callback
+    def _async_add_discovered_switches(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add switches for devices found after setup."""
+        if config_entry_id != entry.entry_id or device_type not in description_factories:
+            return
+        new_device_ids = device_ids - known_device_ids[device_type]
+        if not new_device_ids:
+            return
+        known_device_ids[device_type].update(new_device_ids)
+        async_add_entities(_create_switches(device_type, new_device_ids))
 
-    async_add_entities(switches)
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_switches))
+    async_add_entities(
+        switch
+        for device_type, device_ids in known_device_ids.items()
+        for switch in _create_switches(device_type, device_ids)
+    )

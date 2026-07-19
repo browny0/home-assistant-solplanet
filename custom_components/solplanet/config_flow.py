@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -20,14 +19,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_adapter import SolplanetApiAdapter
 from .client import SolplanetClient
-from .const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN
+from .const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN, MAX_INTERVAL, MIN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
-        vol.Required(CONF_INTERVAL, default=DEFAULT_INTERVAL): int,
+        vol.Required(CONF_INTERVAL, default=DEFAULT_INTERVAL): vol.All(
+            vol.Coerce(int), vol.Range(min=MIN_INTERVAL, max=MAX_INTERVAL)
+        ),
     }
 )
 
@@ -105,7 +106,9 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
         current_interval = entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL)
         schema = vol.Schema(
             {
-                vol.Required(CONF_INTERVAL, default=current_interval): int,
+                vol.Required(CONF_INTERVAL, default=current_interval): vol.All(
+                    vol.Coerce(int), vol.Range(min=MIN_INTERVAL, max=MAX_INTERVAL)
+                ),
             }
         )
 
@@ -160,7 +163,9 @@ class SolplanetOptionsFlow(OptionsFlow):
         current_interval = self._config_entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL)
         schema = vol.Schema(
             {
-                vol.Required(CONF_INTERVAL, default=current_interval): int,
+                vol.Required(CONF_INTERVAL, default=current_interval): vol.All(
+                    vol.Coerce(int), vol.Range(min=MIN_INTERVAL, max=MAX_INTERVAL)
+                ),
             }
         )
 

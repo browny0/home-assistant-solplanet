@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import device_registry as dr, entity_registry as er
-import voluptuous as vol
 
-from .client import ScheduleSlot, BatterySchedule
-from .const import DOMAIN, BATTERY_IDENTIFIER, METER_IDENTIFIER
+import voluptuous as vol
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+
+from .client import BatterySchedule, ScheduleSlot
+from .const import BATTERY_IDENTIFIER, DOMAIN, METER_IDENTIFIER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,8 +107,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         processed = False
         for isn in isns:
-            for data in hass.data[DOMAIN].values():
-                coordinator = data["coordinator"]
+            for runtime in hass.data[DOMAIN].values():
+                coordinator = runtime.coordinator
                 if isn in coordinator.data[BATTERY_IDENTIFIER]:
                     try:
                         # Get current schedule; "slots" may be absent if the schedule fetch
@@ -159,8 +161,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         processed = False
         for isn in isns:
-            for data in hass.data[DOMAIN].values():
-                coordinator = data["coordinator"]
+            for runtime in hass.data[DOMAIN].values():
+                coordinator = runtime.coordinator
                 if isn in coordinator.data[BATTERY_IDENTIFIER]:
                     schedule_data = coordinator.data[BATTERY_IDENTIFIER][isn].get("schedule") or {}
                     current_schedule = schedule_data.get("slots") or {}
@@ -191,9 +193,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         processed = False
         for meter_isn in meter_isns:
-            for data in hass.data.get(DOMAIN, {}).values():
-                coordinator = data.get("coordinator")
-                if coordinator and meter_isn in coordinator.data.get(METER_IDENTIFIER, {}):
+            for runtime in hass.data.get(DOMAIN, {}).values():
+                coordinator = runtime.coordinator
+                if meter_isn in coordinator.data.get(METER_IDENTIFIER, {}):
                     if validator is not None:
                         validator(coordinator, payload)
                     await coordinator.set_meter_power_limit(payload)

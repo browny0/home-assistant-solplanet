@@ -1,23 +1,25 @@
 """Solplanet binary sensor platform."""
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
 from .client import BatterySchedule
-from .const import BATTERY_IDENTIFIER, DOMAIN, INVERTER_IDENTIFIER
+from .const import BATTERY_IDENTIFIER, DISCOVERY_SIGNAL, INVERTER_IDENTIFIER
 from .entity import SolplanetEntity, SolplanetEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -49,7 +51,9 @@ class SolplanetBinarySensor(SolplanetEntity, BinarySensorEntity):
 def create_battery_binary_sensors(coordinator, isn: str) -> list[SolplanetBinarySensorEntityDescription]:
     """Create binary sensors for battery."""
 
-    def value_mapper(raw):
+    def value_mapper(raw: object) -> bool | None:
+        if not isinstance(raw, dict):
+            return None
         has_schedule = any(
             any(code != 0 for code in raw.get(day, [])) for day in BatterySchedule.DAYS if day in raw
         )
@@ -99,23 +103,47 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensors."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    api = hass.data[DOMAIN][entry.entry_id]["api"]
+    coordinator = entry.runtime_data.coordinator
+    api = entry.runtime_data.api
 
-    sensors: list[SolplanetBinarySensor] = []
-
-    for isn in coordinator.data[BATTERY_IDENTIFIER]:
-        sensors.extend(
-            SolplanetBinarySensor(description=description, isn=isn, coordinator=coordinator)
-            for description in create_battery_binary_sensors(coordinator, isn)
-        )
-
+    description_factories = {BATTERY_IDENTIFIER: create_battery_binary_sensors}
     if api.version == "v2":
-        for isn in coordinator.data[INVERTER_IDENTIFIER]:
-            sensors.extend(
-                SolplanetBinarySensor(description=description, isn=isn, coordinator=coordinator)
-                for description in create_inverter_binary_sensors(coordinator, isn)
-            )
+        description_factories[INVERTER_IDENTIFIER] = create_inverter_binary_sensors
+
+    known_device_ids = {
+        device_type: set(coordinator.data[device_type]) for device_type in description_factories
+    }
+
+    def _create_sensors(device_type: str, device_ids: set[str]) -> list[SolplanetBinarySensor]:
+        factory = description_factories[device_type]
+        return [
+            SolplanetBinarySensor(description=description, isn=device_id, coordinator=coordinator)
+            for device_id in device_ids
+            for description in factory(coordinator, device_id)
+        ]
+
+    sensors = [
+        sensor
+        for device_type, device_ids in known_device_ids.items()
+        for sensor in _create_sensors(device_type, device_ids)
+    ]
+
+    @callback
+    def _async_add_discovered_sensors(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add binary sensors for devices found after setup."""
+        if config_entry_id != entry.entry_id or device_type not in description_factories:
+            return
+        new_device_ids = device_ids - known_device_ids[device_type]
+        if not new_device_ids:
+            return
+        known_device_ids[device_type].update(new_device_ids)
+        async_add_entities(_create_sensors(device_type, new_device_ids))
+
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_sensors))
 
     # Always add entities; values may be missing during startup/inverter sleep.
     async_add_entities(sensors)

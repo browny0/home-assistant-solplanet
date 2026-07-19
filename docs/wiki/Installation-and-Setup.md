@@ -32,10 +32,10 @@ If you are moving from another Solplanet custom integration, remove the old repo
 2. Select **Add integration**.
 3. Search for **Solplanet**.
 4. Enter the dongle IP address or hostname without `http://`, `https://`, or a port number.
-5. Leave the update interval at 60 seconds for your first setup.
+5. Leave the live data update interval at 60 seconds for your first setup.
 6. Submit the form and wait for the first update to finish.
 
-We automatically try the supported HTTPS and HTTP connection methods. When setup succeeds, we create devices for the inverter and any batteries, meters, or dongles that the system reports.
+We automatically try the supported HTTPS and HTTP connection methods. When setup succeeds, we create devices for the inverter and any batteries, meters, or dongles that the system reports. The integration checks the device inventory hourly, so newly reported devices and newly exposed entities can appear without restarting Home Assistant. If a previously discovered device disappears from the inventory, its entities become unavailable rather than being deleted.
 
 After setup, open the new Solplanet devices and confirm that power and state-of-charge values update. Some values from sleeping hardware may show `unknown`; see [Troubleshooting](Troubleshooting) if the integration itself is unavailable.
 
@@ -61,4 +61,8 @@ The dongle may continue connecting to Solplanet cloud services while we use its 
 
 ## Change The Update Interval
 
-Open **Settings > Devices & services > Solplanet**, select **Configure**, and enter the new interval in seconds. Start with the 60-second default. Short intervals add load to the dongle and can cause slow or failed updates.
+Open **Settings > Devices & services > Solplanet**, select **Configure**, and enter the new interval in seconds. The allowed range is 10 to 3600 seconds, and the default is 60 seconds.
+
+This interval controls live inverter, battery, meter, and dongle-warning data. Device inventory, identity, network details, schedules, and other settings refresh separately every hour. Supported setting changes also request a metadata refresh so their entities can update without waiting for the next hourly cycle.
+
+The integration serializes all requests to the dongle, so its live-data pollers and writes do not overlap. Short intervals still add load and can cause slow or failed updates. After three consecutive full failures, the affected live-data poller waits at least 10 minutes between attempts; it returns to your configured interval after a successful update.

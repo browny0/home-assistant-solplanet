@@ -2,6 +2,7 @@
 
 DOMAIN = "solplanet"
 MANUFACTURER = "Solplanet"
+DISCOVERY_SIGNAL = f"{DOMAIN}_discovery_new"
 
 INVERTER_IDENTIFIER = "inverter"
 BATTERY_IDENTIFIER = "battery"
@@ -10,6 +11,8 @@ DONGLE_IDENTIFIER = "dongle"
 
 CONF_INTERVAL = "interval"
 DEFAULT_INTERVAL = 60
+MIN_INTERVAL = 10
+MAX_INTERVAL = 3600
 
 INVERTER_ERROR_CODES = {
     0: "No error",

@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from collections import abc
 from dataclasses import dataclass
-import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
-from .const import DOMAIN, DONGLE_IDENTIFIER
+from .const import DISCOVERY_SIGNAL, DONGLE_IDENTIFIER
 from .coordinator import SolplanetDataUpdateCoordinator
 from .entity import SolplanetEntity, SolplanetEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -39,7 +41,6 @@ class SolplanetButton(SolplanetEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self.entity_description.callback()
-        self.coordinator.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 def create_dongle_entities_description(
@@ -78,18 +79,31 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities for Solplanet from a config entry."""
-    coordinator: SolplanetDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
-    buttons: list[SolplanetButton] = []
+    known_device_ids = set(coordinator.data[DONGLE_IDENTIFIER])
 
-    for dongle_id in coordinator.data.get(DONGLE_IDENTIFIER, {}):
-        for description in create_dongle_entities_description(coordinator, dongle_id):
-            buttons.append(
-                SolplanetButton(
-                    description=description,
-                    isn=dongle_id,
-                    coordinator=coordinator,
-                )
-            )
+    def _create_buttons(device_ids: set[str]) -> list[SolplanetButton]:
+        return [
+            SolplanetButton(description=description, isn=device_id, coordinator=coordinator)
+            for device_id in device_ids
+            for description in create_dongle_entities_description(coordinator, device_id)
+        ]
 
-    async_add_entities(buttons)
+    @callback
+    def _async_add_discovered_buttons(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add buttons for dongles found after setup."""
+        if config_entry_id != entry.entry_id or device_type != DONGLE_IDENTIFIER:
+            return
+        new_device_ids = device_ids - known_device_ids
+        if not new_device_ids:
+            return
+        known_device_ids.update(new_device_ids)
+        async_add_entities(_create_buttons(new_device_ids))
+
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_buttons))
+    async_add_entities(_create_buttons(known_device_ids))

@@ -1,21 +1,23 @@
 """Solplanet number platform."""
 
+import logging
 from collections import abc
 from dataclasses import dataclass
-import logging
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription
-from homeassistant.const import UnitOfPower, PERCENTAGE
-from homeassistant.core import HomeAssistant
+from homeassistant.const import PERCENTAGE, UnitOfPower
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
-from .const import BATTERY_IDENTIFIER, BATTERY_MODELS_WITH_LED, DOMAIN
+from .const import BATTERY_IDENTIFIER, BATTERY_MODELS_WITH_LED, DISCOVERY_SIGNAL
 from .coordinator import SolplanetDataUpdateCoordinator
-from .entity import SolplanetEntity, SolplanetEntityDescription
+from .entity import SolplanetEntity, SolplanetEntityDescription, get_entity_unique_id
 
 _LOGGER = logging.getLogger(__name__)
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -54,7 +56,6 @@ class SolplanetNumber(SolplanetEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Set the selected value."""
         await self.entity_description.callback(value)
-        self.coordinator.hass.async_create_task(self.coordinator.async_request_refresh())
 
 
 def create_battery_entities_description(
@@ -147,19 +148,46 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up number entities for Solplanet from a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
-    sensors: list[SolplanetNumber] = []
+    known_unique_ids: set[str] = set()
 
-    for isn in coordinator.data[BATTERY_IDENTIFIER]:
-        sensors.extend(
-            SolplanetNumber(
-                description=entity_description,
-                isn=isn,
-                coordinator=coordinator,
-            )
-            for entity_description in create_battery_entities_description(coordinator, isn)
-        )
+    def _create_numbers(device_ids: set[str]) -> list[SolplanetNumber]:
+        new_numbers: list[SolplanetNumber] = []
+        for device_id in device_ids:
+            for description in create_battery_entities_description(coordinator, device_id):
+                unique_id = get_entity_unique_id(description, device_id)
+                if unique_id in known_unique_ids:
+                    continue
+                number = SolplanetNumber(
+                    description=description,
+                    isn=device_id,
+                    coordinator=coordinator,
+                )
+                known_unique_ids.add(unique_id)
+                new_numbers.append(number)
+        return new_numbers
+
+    @callback
+    def _async_add_discovered_numbers(
+        config_entry_id: str,
+        device_type: str,
+        device_ids: set[str],
+    ) -> None:
+        """Add numbers for batteries found after setup."""
+        if config_entry_id != entry.entry_id or device_type != BATTERY_IDENTIFIER:
+            return
+        async_add_entities(_create_numbers(device_ids))
+
+    @callback
+    def _async_add_metadata_descriptions() -> None:
+        """Add controls for battery capabilities first reported after setup."""
+        new_numbers = _create_numbers(set(coordinator.data[BATTERY_IDENTIFIER]))
+        if new_numbers:
+            async_add_entities(new_numbers)
+
+    entry.async_on_unload(async_dispatcher_connect(hass, DISCOVERY_SIGNAL, _async_add_discovered_numbers))
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_metadata_descriptions))
 
     # Always add entities; values may be missing during startup/inverter sleep.
-    async_add_entities(sensors)
+    async_add_entities(_create_numbers(set(coordinator.data[BATTERY_IDENTIFIER])))

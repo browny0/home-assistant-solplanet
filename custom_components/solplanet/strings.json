@@ -4,14 +4,14 @@
       "user": {
         "data": {
           "host": "Solplanet inverter ip address / host",
-          "interval": "Update interval (seconds)"
+        "interval": "Live data update interval (seconds)"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Solplanet",
-        "description": "Update the polling interval for this device",
+      "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
         "data": {
-          "interval": "Update interval (seconds)"
+        "interval": "Live data update interval (seconds)"
         }
       }
     },
@@ -28,9 +28,9 @@
     "step": {
       "init": {
         "title": "Configure Solplanet",
-        "description": "Update the polling interval for this device",
+      "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
         "data": {
-          "interval": "Update interval (seconds)"
+        "interval": "Live data update interval (seconds)"
         }
       }
     }

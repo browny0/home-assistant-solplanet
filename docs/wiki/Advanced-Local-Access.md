@@ -41,12 +41,14 @@ The integration does not ask for a dongle username or password. Anyone who can r
 
 ## Avoid Overloading The Dongle
 
-The dongle has limited processing capacity. Fast polling, concurrent requests, or multiple custom REST sensors can cause timeouts and make both Home Assistant and the Solplanet app slow.
+The dongle has limited processing capacity. Fast polling or requests from multiple clients can cause timeouts and make both Home Assistant and the Solplanet app slow. The integration serializes its own reads and writes so they do not overlap, but REST sensors, scripts, the app, and other software do not share that protection.
 
 - Use the integration instead of duplicating its requests with REST sensors.
-- Keep the default 60-second interval unless you have a clear need to change it.
+- Keep the default 60-second live data interval unless you have a clear need to change it.
 - Stagger any additional requests rather than sending them together.
-- Expect an update cycle to take longer when the dongle is busy.
+- Expect different groups of entities to update at slightly different times while their requests wait for the dongle.
+
+The configurable interval applies to live inverter, battery, meter, and dongle-warning data. Inventory and settings use a separate hourly refresh. After three consecutive full failures, the affected live-data poller waits at least 10 minutes between attempts and returns to the configured interval after communication recovers.
 
 ## Raw Endpoints And Modbus
 

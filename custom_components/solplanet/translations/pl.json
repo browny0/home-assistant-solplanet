@@ -4,14 +4,14 @@
       "user": {
         "data": {
           "host": "Adres IP / host falownika Solplanet",
-          "interval": "Odświeżaj dane co (sekundy)"
+        "interval": "Interwał odświeżania danych bieżących (sekundy)"
         }
       },
       "reconfigure": {
         "title": "Rekonfiguruj Solplanet",
-        "description": "Zaktualizuj interwał odpytywania dla tego urządzenia",
+      "description": "Ustaw odpytywanie danych bieżących (10-3600 sekund). Metadane i ustawienia są odświeżane co godzinę.",
         "data": {
-          "interval": "Odświeżaj dane co (sekundy)"
+        "interval": "Interwał odświeżania danych bieżących (sekundy)"
         }
       }
     },
@@ -28,9 +28,9 @@
     "step": {
       "init": {
         "title": "Konfiguruj Solplanet",
-        "description": "Zaktualizuj interwał odpytywania dla tego urządzenia",
+      "description": "Ustaw odpytywanie danych bieżących (10-3600 sekund). Metadane i ustawienia są odświeżane co godzinę.",
         "data": {
-          "interval": "Odświeżaj dane co (sekundy)"
+        "interval": "Interwał odświeżania danych bieżących (sekundy)"
         }
       }
     }

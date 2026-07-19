@@ -1,8 +1,8 @@
 """Solplanet base entity."""
 
+import logging
 from collections import abc
 from dataclasses import dataclass
-import logging
 from typing import Any
 
 from homeassistant.core import callback
@@ -31,6 +31,16 @@ class SolplanetEntityDescription(EntityDescription):
     attributes_fn: abc.Callable[[Any], dict[str, Any]] | None = None
 
 
+def get_entity_unique_id(description: SolplanetEntityDescription, device_id: str) -> str:
+    """Return the stable entity-registry unique ID for a description and device."""
+    suffix = description.unique_id_suffix or "_".join(
+        str(path_item) for path_item in description.data_field_path
+    )
+    if description.data_field_device_type == INVERTER_IDENTIFIER:
+        return f"solplanet_{device_id}_{suffix}"
+    return f"solplanet_{description.data_field_device_type}_{device_id}_{suffix}"
+
+
 class SolplanetEntity(CoordinatorEntity, Entity):
     """Base class for Solplanet entities backed by the coordinator.
 
@@ -49,21 +59,19 @@ class SolplanetEntity(CoordinatorEntity, Entity):
         coordinator: SolplanetDataUpdateCoordinator,
     ) -> None:
         """Initialize the entity."""
+        coordinator = coordinator.runtime.coordinator_for(
+            description.data_field_device_type,
+            description.data_field_data_type,
+        )
         super().__init__(coordinator)
         self.entity_description = description
-        self.unique_id_suffix = (
-            description.unique_id_suffix
-            if description.unique_id_suffix
-            else "_".join(str(x) for x in description.data_field_path)
+        self.unique_id_suffix = description.unique_id_suffix or "_".join(
+            str(path_item) for path_item in description.data_field_path
         )
         self._isn = isn
 
         # Stable unique_id for the entity registry
-        self._attr_unique_id = (
-            f"solplanet_{isn}_{self.unique_id_suffix}"
-            if description.data_field_device_type == INVERTER_IDENTIFIER
-            else f"solplanet_{self.entity_description.data_field_device_type}_{isn}_{self.unique_id_suffix}"
-        )
+        self._attr_unique_id = get_entity_unique_id(description, isn)
 
         # Set initial value (may be None if inverter is sleeping / data not ready yet)
         self._set_native_value()
@@ -97,20 +105,20 @@ class SolplanetEntity(CoordinatorEntity, Entity):
             raise InverterInSleepModeError from None
 
         for path_item in self.entity_description.data_field_path:
-            if (
-                (isinstance(data, list) and len(data) > 0)
-                or hasattr(data, "__dict__")
-                or isinstance(data, dict)
-            ):
-                data = (
-                    data[int(path_item)]
-                    if isinstance(data, list)
-                    else getattr(data, str(path_item), None)
-                    if hasattr(data, "__dict__")
-                    else data.get(path_item)
-                )
+            if isinstance(data, list):
+                try:
+                    data = data[int(path_item)]
+                except (IndexError, TypeError, ValueError):
+                    return None
+            elif hasattr(data, "__dict__"):
+                data = getattr(data, str(path_item), None)
+            elif isinstance(data, dict):
+                data = data.get(path_item)
             else:
                 return None
+
+        if data is None:
+            return None
 
         if self.entity_description.data_field_value_mapper is not None:
             data = self.entity_description.data_field_value_mapper(data)
@@ -142,12 +150,14 @@ class SolplanetEntity(CoordinatorEntity, Entity):
     def available(self) -> bool:
         """Return entity availability.
 
-        Keep entities available when the coordinator update succeeded but a specific value is
-        missing (e.g. inverter sleeping). Only mark unavailable when the coordinator update failed.
+        A missing value remains Unknown while the device stays available. Endpoint failures and
+        devices no longer present in the latest inventory are unavailable.
         """
-        if not self.coordinator.last_update_success:
-            return False
-        return True
+        return (
+            self.coordinator.last_update_success
+            and self._isn not in self.coordinator.failed_device_ids
+            and self._isn in self.coordinator.data.get(self.entity_description.data_field_device_type, {})
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
