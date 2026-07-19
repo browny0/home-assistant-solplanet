@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from homeassistant.const import CONF_HOST
@@ -46,6 +46,23 @@ def _hass() -> SimpleNamespace:
             async_update_entry=Mock(),
         ),
     )
+
+
+def _registry(*devices: SimpleNamespace) -> SimpleNamespace:
+    """Return the device-registry surface used by setup and cleanup."""
+    return SimpleNamespace(
+        async_get_or_create=Mock(),
+        async_remove_device=Mock(),
+        async_update_device=Mock(),
+        devices=SimpleNamespace(
+            get_devices_for_config_entry_id=Mock(return_value=list(devices))
+        ),
+    )
+
+
+def _device(device_id: str, *identifiers: tuple[str, str]) -> SimpleNamespace:
+    """Return a minimal device-registry entry."""
+    return SimpleNamespace(id=device_id, identifiers=set(identifiers))
 
 
 def test_register_devices_covers_all_inventory_types() -> None:
@@ -102,7 +119,7 @@ def test_register_devices_covers_all_inventory_types() -> None:
         }
     )
     entry = SimpleNamespace(entry_id="entry-id", runtime_data=runtime)
-    registry = SimpleNamespace(async_get_or_create=Mock())
+    registry = _registry()
 
     integration._register_devices(registry, entry)
 
@@ -112,11 +129,121 @@ def test_register_devices_covers_all_inventory_types() -> None:
     assert calls[1]["name"] == "Solplanet Dongle"
     assert calls[2]["sw_version"] == "Master: M1, Slave: S1, Security: T1"
     assert calls[3]["name"] == "ASW2.5S-LB-G1"
+    assert calls[3]["identifiers"] == {(DOMAIN, "battery_BAT-1")}
     assert calls[3]["manufacturer"] == "Solplanet"
     assert calls[3]["serial_number"] == "BAT-SERIAL"
     assert calls[4]["model"] == "EASTRON SDM630-Modbus V2"
     assert calls[5]["name"] == "Meter"
     assert calls[6]["name"] == "Energy meter"
+
+
+def test_register_devices_detaches_only_authoritatively_stale_devices() -> None:
+    """A complete inventory detaches stale devices without deleting shared entries."""
+    inverter_info = SimpleNamespace(
+        isn="INV-1",
+        model="ASW5000",
+        msw="M1",
+        ssw="S1",
+        tsw="T1",
+    )
+    runtime = SimpleNamespace(
+        data={
+            DONGLE_IDENTIFIER: {"DG-1": {"data": {}}},
+            INVERTER_IDENTIFIER: {"INV-1": {"info": inverter_info}},
+            BATTERY_IDENTIFIER: {},
+            METER_IDENTIFIER: {
+                "METER-1": {"app_info": {"sn": "METER-1", "equipModel": "1"}}
+            },
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry-id", runtime_data=runtime)
+    registry = _registry(
+        _device("current-inverter", (DOMAIN, "INV-1")),
+        _device(
+            "current-multi-identifier",
+            (DOMAIN, "INV-1"),
+            (DOMAIN, "OLD-ALIAS"),
+        ),
+        _device("stale-inverter", (DOMAIN, "OLD-INV")),
+        _device("stale-battery", (DOMAIN, "battery_OLD-BAT")),
+        _device("current-dongle", (DOMAIN, "dongle_DG-1")),
+        _device("stale-dongle", (DOMAIN, "dongle_OLD-DG")),
+        _device("current-meter", (DOMAIN, "meter_METER-1")),
+        _device("stale-meter", (DOMAIN, "meter_OLD-METER")),
+        _device("other-integration", ("other", "device")),
+    )
+
+    integration._register_devices(registry, entry)
+
+    assert registry.async_update_device.call_args_list == [
+        call(device_id="stale-inverter", remove_config_entry_id="entry-id"),
+        call(device_id="stale-battery", remove_config_entry_id="entry-id"),
+        call(device_id="stale-dongle", remove_config_entry_id="entry-id"),
+        call(device_id="stale-meter", remove_config_entry_id="entry-id"),
+    ]
+    registry.async_remove_device.assert_not_called()
+    registry.devices.get_devices_for_config_entry_id.assert_called_once_with("entry-id")
+
+
+def test_register_devices_preserves_uncertain_dongle_and_meter_entries() -> None:
+    """Empty optional endpoint caches are not proof that their devices vanished."""
+    inverter_info = SimpleNamespace(
+        isn="INV-1",
+        model="ASW5000",
+        msw="M1",
+        ssw="S1",
+        tsw="T1",
+    )
+    entry = SimpleNamespace(
+        entry_id="entry-id",
+        runtime_data=SimpleNamespace(
+            data={
+                DONGLE_IDENTIFIER: {},
+                INVERTER_IDENTIFIER: {"INV-1": {"info": inverter_info}},
+                BATTERY_IDENTIFIER: {"BAT-PRESENT": {"info": None}},
+                METER_IDENTIFIER: {},
+            }
+        ),
+    )
+    registry = _registry(
+        _device("stale-dongle", (DOMAIN, "dongle_OLD-DG")),
+        _device("stale-meter", (DOMAIN, "meter_OLD-METER")),
+        _device("current-battery", (DOMAIN, "battery_BAT-PRESENT")),
+        _device("stale-battery", (DOMAIN, "battery_OLD-BAT")),
+    )
+
+    integration._register_devices(registry, entry)
+
+    registry.async_update_device.assert_called_once_with(
+        device_id="stale-battery",
+        remove_config_entry_id="entry-id",
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_device_removal_requires_a_stale_solplanet_identifier() -> None:
+    """The registry delete button is allowed only for absent Solplanet devices."""
+    inverter_info = SimpleNamespace(isn="INV-1")
+    entry = SimpleNamespace(
+        runtime_data=SimpleNamespace(
+            data={
+                DONGLE_IDENTIFIER: {},
+                INVERTER_IDENTIFIER: {"INV-1": {"info": inverter_info}},
+                BATTERY_IDENTIFIER: {},
+                METER_IDENTIFIER: {},
+            }
+        )
+    )
+
+    assert not await integration.async_remove_config_entry_device(
+        SimpleNamespace(), entry, _device("current", (DOMAIN, "INV-1"))
+    )
+    assert await integration.async_remove_config_entry_device(
+        SimpleNamespace(), entry, _device("stale", (DOMAIN, "OLD-INV"))
+    )
+    assert not await integration.async_remove_config_entry_device(
+        SimpleNamespace(), entry, _device("unrelated", ("other", "device"))
+    )
 
 
 @pytest.mark.asyncio
@@ -137,10 +264,11 @@ async def test_setup_entry_imports_real_platforms_and_builds_runtime() -> None:
     entry = _entry(interval=1)
     api = SimpleNamespace(version="v2")
     client = Mock()
-    registry = SimpleNamespace(async_get_or_create=Mock())
+    registry = _registry()
     metadata = SimpleNamespace(
         async_config_entry_first_refresh=AsyncMock(),
         async_add_listener=Mock(return_value="remove-listener"),
+        last_update_success=True,
     )
     inverter = SimpleNamespace(async_refresh=AsyncMock())
     battery = SimpleNamespace(async_refresh=AsyncMock())
@@ -199,6 +327,14 @@ async def test_setup_entry_imports_real_platforms_and_builds_runtime() -> None:
     assert entry.runtime_data.metadata_coordinator is metadata
     assert hass.data[DOMAIN][entry.entry_id] is entry.runtime_data
     entry.async_on_unload.assert_called_once_with("remove-listener")
+    listener = metadata.async_add_listener.call_args.args[0]
+    assert registry.devices.get_devices_for_config_entry_id.call_count == 1
+    metadata.last_update_success = False
+    listener()
+    assert registry.devices.get_devices_for_config_entry_id.call_count == 1
+    metadata.last_update_success = True
+    listener()
+    assert registry.devices.get_devices_for_config_entry_id.call_count == 2
     hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(
         entry,
         integration.PLATFORMS,
@@ -211,10 +347,11 @@ async def test_setup_entry_clamps_large_poll_interval() -> None:
     hass = _hass()
     entry = _entry(interval=99999)
     api = SimpleNamespace(version="v2")
-    registry = SimpleNamespace(async_get_or_create=Mock())
+    registry = _registry()
     metadata = SimpleNamespace(
         async_config_entry_first_refresh=AsyncMock(),
         async_add_listener=Mock(return_value=None),
+        last_update_success=True,
     )
     live = [SimpleNamespace(async_refresh=AsyncMock()) for _ in range(4)]
 

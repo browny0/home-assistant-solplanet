@@ -54,6 +54,81 @@ _LOGGER = logging.getLogger(__name__)
 type SolplanetConfigEntry = ConfigEntry[SolplanetRuntimeData]
 
 
+def _current_device_identifiers(
+    entry: SolplanetConfigEntry,
+) -> dict[str, set[tuple[str, str]]]:
+    """Return registry identifiers represented by the current inventory."""
+    data = entry.runtime_data.data
+    return {
+        DONGLE_IDENTIFIER: {
+            (DOMAIN, f"{DONGLE_IDENTIFIER}_{dongle_id}")
+            for dongle_id in data[DONGLE_IDENTIFIER]
+        },
+        INVERTER_IDENTIFIER: {
+            (DOMAIN, inverter_id) for inverter_id in data[INVERTER_IDENTIFIER]
+        },
+        BATTERY_IDENTIFIER: {
+            (DOMAIN, f"{BATTERY_IDENTIFIER}_{battery_id}")
+            for battery_id in data[BATTERY_IDENTIFIER]
+        },
+        METER_IDENTIFIER: {
+            (DOMAIN, f"{METER_IDENTIFIER}_{meter_id}")
+            for meter_id in data[METER_IDENTIFIER]
+        },
+    }
+
+
+def _device_type_from_identifier(identifier: tuple[str, str]) -> str:
+    """Return the Solplanet device type encoded in a registry identifier."""
+    value = identifier[1]
+    if value.startswith(f"{DONGLE_IDENTIFIER}_"):
+        return DONGLE_IDENTIFIER
+    if value.startswith(f"{BATTERY_IDENTIFIER}_"):
+        return BATTERY_IDENTIFIER
+    if value.startswith(f"{METER_IDENTIFIER}_"):
+        return METER_IDENTIFIER
+    return INVERTER_IDENTIFIER
+
+
+@callback
+def _remove_stale_devices(
+    device_registry: dr.DeviceRegistry,
+    entry: SolplanetConfigEntry,
+    current_identifiers: dict[str, set[tuple[str, str]]],
+) -> None:
+    """Detach devices absent from an authoritative inventory snapshot."""
+    data = entry.runtime_data.data
+    authoritative_device_types = {INVERTER_IDENTIFIER, BATTERY_IDENTIFIER}
+
+    # Dongle and meter endpoint failures preserve their previous cache. An
+    # empty cache is therefore not sufficient proof that the device vanished.
+    if data[DONGLE_IDENTIFIER]:
+        authoritative_device_types.add(DONGLE_IDENTIFIER)
+    if data[METER_IDENTIFIER]:
+        authoritative_device_types.add(METER_IDENTIFIER)
+
+    all_current_identifiers = set().union(*current_identifiers.values())
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        solplanet_identifiers = {
+            identifier for identifier in device.identifiers if identifier[0] == DOMAIN
+        }
+        if not solplanet_identifiers:
+            continue
+        if any(
+            _device_type_from_identifier(identifier) not in authoritative_device_types
+            for identifier in solplanet_identifiers
+        ):
+            continue
+        if not solplanet_identifiers.isdisjoint(all_current_identifiers):
+            continue
+
+        _LOGGER.debug("Removing stale Solplanet device %s", device.id)
+        device_registry.async_update_device(
+            device_id=device.id,
+            remove_config_entry_id=entry.entry_id,
+        )
+
+
 @callback
 def _register_devices(
     device_registry: dr.DeviceRegistry,
@@ -61,6 +136,7 @@ def _register_devices(
 ) -> None:
     """Create or update device-registry entries from the metadata cache."""
     data = entry.runtime_data.data
+    current_identifiers = _current_device_identifiers(entry)
 
     for dongle_id, dongle_entry in data[DONGLE_IDENTIFIER].items():
         dongle = dongle_entry.get("data", {}) or {}
@@ -75,11 +151,11 @@ def _register_devices(
             sw_version=dongle.get("sw") or "",
         )
 
-    for inverter_entry in data[INVERTER_IDENTIFIER].values():
+    for inverter_id, inverter_entry in data[INVERTER_IDENTIFIER].items():
         inverter_info = inverter_entry["info"]
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, inverter_info.isn or "")},
+            identifiers={(DOMAIN, inverter_id)},
             name=inverter_info.model,
             model=inverter_info.model,
             manufacturer=MANUFACTURER,
@@ -89,7 +165,7 @@ def _register_devices(
             ),
         )
 
-    for battery_entry in data[BATTERY_IDENTIFIER].values():
+    for battery_id, battery_entry in data[BATTERY_IDENTIFIER].items():
         battery_info = battery_entry.get("info")
         if battery_info is None:
             continue
@@ -109,7 +185,7 @@ def _register_devices(
         )
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, f"{BATTERY_IDENTIFIER}_{battery_info.isn or ''}")},
+            identifiers={(DOMAIN, f"{BATTERY_IDENTIFIER}_{battery_id}")},
             name=battery_model or "Battery",
             manufacturer=battery_manufacturer,
             model=battery_model,
@@ -149,6 +225,23 @@ def _register_devices(
                 manufacturer=meter_info.manufactory,
                 model=meter_info.name,
             )
+
+    _remove_stale_devices(device_registry, entry, current_identifiers)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    entry: SolplanetConfigEntry,
+    device: dr.DeviceEntry,
+) -> bool:
+    """Allow manual removal only when a device is absent from the inventory."""
+    current_identifiers = set().union(*_current_device_identifiers(entry).values())
+    solplanet_identifiers = {
+        identifier for identifier in device.identifiers if identifier[0] == DOMAIN
+    }
+    return bool(solplanet_identifiers) and solplanet_identifiers.isdisjoint(
+        current_identifiers
+    )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -224,6 +317,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) ->
 
     @callback
     def _async_register_devices() -> None:
+        if not coordinator.last_update_success:
+            return
         _register_devices(device_registry, entry)
 
     _async_register_devices()
