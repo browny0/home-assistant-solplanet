@@ -22,7 +22,14 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .api_adapter import SolplanetApiAdapter
 from .client import SolplanetClient
-from .const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN, MAX_INTERVAL, MIN_INTERVAL
+from .const import (
+    CONF_INTERVAL,
+    DEFAULT_INTERVAL,
+    DOMAIN,
+    DONGLE_IDENTIFIER,
+    MAX_INTERVAL,
+    MIN_INTERVAL,
+)
 from .validation import normalize_mac_address
 
 _LOGGER = logging.getLogger(__name__)
@@ -137,6 +144,19 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
             None,
         )
 
+    def _entry_owns_identity(self, entry: ConfigEntry, unique_id: str) -> bool:
+        """Return whether the device registry links an identity to an entry."""
+        expected_identifiers = {
+            (DOMAIN, unique_id),
+            (DOMAIN, f"{DONGLE_IDENTIFIER}_{unique_id}"),
+        }
+        return any(
+            not expected_identifiers.isdisjoint(device.identifiers)
+            for device in dr.async_entries_for_config_entry(
+                dr.async_get(self.hass), entry.entry_id
+            )
+        )
+
     @staticmethod
     def async_get_options_flow(
         config_entry: ConfigEntry,
@@ -144,30 +164,53 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return SolplanetOptionsFlow(config_entry)
 
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Handle reconfiguration of the integration."""
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Update the config entry with new interval
-            new_data = {**entry.data, CONF_INTERVAL: user_input[CONF_INTERVAL]}
-            self.hass.config_entries.async_update_entry(entry, data=new_data)
-            await self.hass.config_entries.async_reload(entry.entry_id)
-            return self.async_abort(reason="reconfigure_successful")
-
-        # Show form with current interval value
-        current_interval = entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL)
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_INTERVAL, default=current_interval): vol.All(
-                    vol.Coerce(int), vol.Range(min=MIN_INTERVAL, max=MAX_INTERVAL)
-                ),
-            }
-        )
+            try:
+                info = await validate_input(self.hass, user_input)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected exception during reconfiguration")
+                errors["base"] = "unknown"
+            else:
+                unique_id = info["unique_id"]
+                if not isinstance(unique_id, str) or not unique_id.strip():
+                    errors["base"] = "cannot_connect"
+                else:
+                    configured_entry = await self.async_set_unique_id(unique_id)
+                    legacy_identity_matches = (
+                        entry.unique_id == entry.data[CONF_HOST]
+                        and self._entry_owns_identity(entry, unique_id)
+                        and configured_entry is None
+                    )
+                    if not legacy_identity_matches:
+                        self._abort_if_unique_id_mismatch()
+                    updated_title = (
+                        user_input[CONF_HOST]
+                        if entry.title == entry.data[CONF_HOST]
+                        else entry.title
+                    )
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        unique_id=unique_id,
+                        title=updated_title,
+                        data_updates=user_input,
+                    )
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=schema,
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA,
+                user_input or entry.data,
+            ),
+            errors=errors,
         )
 
     async def async_step_dhcp(

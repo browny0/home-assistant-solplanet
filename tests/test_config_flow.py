@@ -15,7 +15,10 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    get_schema_suggested_value,
+)
 
 import custom_components.solplanet as integration
 from custom_components.solplanet.config_flow import (
@@ -25,7 +28,12 @@ from custom_components.solplanet.config_flow import (
     SolplanetOptionsFlow,
     validate_input,
 )
-from custom_components.solplanet.const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN
+from custom_components.solplanet.const import (
+    CONF_INTERVAL,
+    DEFAULT_INTERVAL,
+    DOMAIN,
+    DONGLE_IDENTIFIER,
+)
 
 from tests.helpers import FakeCoordinator, integration_data
 
@@ -533,13 +541,38 @@ async def test_options_flow_shows_current_value_and_updates_entry(hass) -> None:
     reload.assert_awaited_once_with(entry.entry_id)
 
 
-async def test_reconfigure_flow_shows_current_value_and_reloads(hass) -> None:
-    """Reconfigure updates the interval and aborts successfully."""
-    entry = _entry(interval=45)
+@pytest.mark.parametrize(
+    ("title", "expected_title"),
+    [
+        (None, "new.local"),
+        ("Roof inverter", "Roof inverter"),
+    ],
+)
+async def test_reconfigure_validates_and_updates_existing_entry(
+    hass,
+    title: str | None,
+    expected_title: str,
+) -> None:
+    """Reconfigure validates the host and preserves entry-only data."""
+    entry = _entry(interval=45, unique_id="PSN-1", title=title)
     entry.add_to_hass(hass)
-    with patch.object(
-        hass.config_entries, "async_reload", AsyncMock(return_value=True)
-    ) as reload:
+    hass.config_entries.async_update_entry(
+        entry,
+        data={**entry.data, CONF_MAC: "c0:48:2f:20:00:01"},
+    )
+    new_data = {CONF_HOST: "new.local", CONF_INTERVAL: 90}
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(return_value={"title": "new.local", "unique_id": "PSN-1"}),
+        ) as validate,
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
         form = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={
@@ -548,14 +581,211 @@ async def test_reconfigure_flow_shows_current_value_and_reloads(hass) -> None:
             },
         )
         assert form["type"] is FlowResultType.FORM
-        assert form["data_schema"]({})[CONF_INTERVAL] == 45
-        result = await hass.config_entries.flow.async_configure(
-            form["flow_id"], {CONF_INTERVAL: 90}
+        assert (
+            get_schema_suggested_value(form["data_schema"].schema, CONF_HOST)
+            == "old.local"
         )
+        assert (
+            get_schema_suggested_value(form["data_schema"].schema, CONF_INTERVAL)
+            == 45
+        )
+        result = await hass.config_entries.flow.async_configure(
+            form["flow_id"], new_data
+        )
+
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_INTERVAL] == 90
-    reload.assert_awaited_once_with(entry.entry_id)
+    assert entry.data == {
+        **new_data,
+        CONF_MAC: "c0:48:2f:20:00:01",
+    }
+    assert entry.title == expected_title
+    assert entry.unique_id == "PSN-1"
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    validate.assert_awaited_once_with(hass, new_data)
+    schedule_reload.assert_called_once_with(entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    ("first_result", "reason"),
+    [
+        (CannotConnect(), "cannot_connect"),
+        (RuntimeError("surprise"), "unknown"),
+        ({"title": "new.local", "unique_id": ""}, "cannot_connect"),
+    ],
+)
+async def test_reconfigure_recovers_from_validation_errors(
+    hass,
+    first_result: object,
+    reason: str,
+) -> None:
+    """A failed probe leaves the entry unchanged and can be retried."""
+    entry = _entry(interval=45, unique_id="PSN-1")
+    entry.add_to_hass(hass)
+    original_data = dict(entry.data)
+    new_data = {CONF_HOST: "new.local", CONF_INTERVAL: 90}
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(
+                side_effect=[
+                    first_result,
+                    {"title": "new.local", "unique_id": "PSN-1"},
+                ]
+            ),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
+        failed = await hass.config_entries.flow.async_configure(
+            form["flow_id"], new_data
+        )
+
+        assert failed["type"] is FlowResultType.FORM
+        assert failed["errors"] == {"base": reason}
+        assert (
+            get_schema_suggested_value(failed["data_schema"].schema, CONF_HOST)
+            == new_data[CONF_HOST]
+        )
+        assert (
+            get_schema_suggested_value(failed["data_schema"].schema, CONF_INTERVAL)
+            == new_data[CONF_INTERVAL]
+        )
+        assert entry.data == original_data
+        schedule_reload.assert_not_called()
+
+        result = await hass.config_entries.flow.async_configure(
+            failed["flow_id"], new_data
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == new_data
+    schedule_reload.assert_called_once_with(entry.entry_id)
+
+
+async def test_reconfigure_upgrades_a_verified_legacy_identity(hass) -> None:
+    """A registry-backed legacy host ID is safely replaced by the hardware ID."""
+    entry = _entry(host="old.local", interval=45, unique_id="old.local")
+    entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{DONGLE_IDENTIFIER}_PSN-1")},
+    )
+    new_data = {CONF_HOST: "new.local", CONF_INTERVAL: 90}
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(return_value={"title": "new.local", "unique_id": "PSN-1"}),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+            data=new_data,
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == new_data
+    assert entry.unique_id == "PSN-1"
+    schedule_reload.assert_called_once_with(entry.entry_id)
+
+
+@pytest.mark.parametrize("entry_unique_id", ["PSN-1", "old.local"])
+async def test_reconfigure_rejects_a_different_device(
+    hass, entry_unique_id: str
+) -> None:
+    """Reconfigure cannot redirect an entry to another Solplanet device."""
+    entry = _entry(host="old.local", interval=45, unique_id=entry_unique_id)
+    other_entry = _entry(host="other.local", interval=60, unique_id="PSN-2")
+    entry.add_to_hass(hass)
+    other_entry.add_to_hass(hass)
+    original_data = dict(entry.data)
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(return_value={"title": "other.local", "unique_id": "PSN-2"}),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+            data={CONF_HOST: "other.local", CONF_INTERVAL: 90},
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+    assert entry.data == original_data
+    assert other_entry.data == {CONF_HOST: "other.local", CONF_INTERVAL: 60}
+    schedule_reload.assert_not_called()
+
+
+async def test_reconfigure_does_not_duplicate_a_stable_identity(hass) -> None:
+    """A verified legacy identity cannot replace an existing stable entry."""
+    legacy_entry = _entry(host="old.local", interval=45, unique_id="old.local")
+    stable_entry = _entry(host="other.local", interval=60, unique_id="PSN-2")
+    legacy_entry.add_to_hass(hass)
+    stable_entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=legacy_entry.entry_id,
+        identifiers={(DOMAIN, f"{DONGLE_IDENTIFIER}_PSN-2")},
+    )
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(return_value={"title": "other.local", "unique_id": "PSN-2"}),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": legacy_entry.entry_id,
+            },
+            data={CONF_HOST: "other.local", CONF_INTERVAL: 90},
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+    assert legacy_entry.unique_id == "old.local"
+    assert stable_entry.unique_id == "PSN-2"
+    schedule_reload.assert_not_called()
 
 
 def test_options_flow_factory() -> None:

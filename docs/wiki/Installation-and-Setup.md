@@ -65,9 +65,11 @@ The ASW-WLAN-G1 has been used successfully with this integration, but compatibil
 
 The dongle may continue connecting to Solplanet cloud services while we use its local API. Blocking its internet access is optional and does not necessarily make local updates faster or more reliable. See [Advanced Local Access](Advanced-Local-Access) before running it offline.
 
-## Change The Update Interval
+## Change The Dongle Address Or Update Interval
 
-Open **Settings > Devices & services > Solplanet**, select **Configure**, and enter the new interval in seconds. The allowed range is 10 to 3600 seconds, and the default is 60 seconds.
+Open **Settings > Devices & services > Solplanet** and select **Reconfigure** to change the dongle IP address or hostname. The integration connects to the new address and confirms that it belongs to the same Solplanet system before saving it.
+
+The reconfigure form also accepts a new live-data interval. The allowed range is 10 to 3600 seconds, and the default is 60 seconds. You can change only the interval through **Configure** as well.
 
 This interval controls live inverter, battery, meter, and dongle-warning data. Device inventory, identity, network details, schedules, and other settings refresh separately every hour. Supported setting changes also request a metadata refresh so their entities can update without waiting for the next hourly cycle.
 

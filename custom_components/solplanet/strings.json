@@ -13,8 +13,9 @@
       },
       "reconfigure": {
         "title": "Reconfigure Solplanet",
-        "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
+        "description": "Change the dongle address and live telemetry polling interval. The address is validated before the configuration is updated.",
         "data": {
+          "host": "Solplanet dongle IP address / host",
           "interval": "Live data update interval (seconds)"
         }
       }
@@ -27,6 +28,7 @@
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "cannot_connect": "Cannot connect to the discovered device",
       "unknown": "Unexpected error during discovery",
+      "unique_id_mismatch": "The device at this address does not match the configured Solplanet device",
       "reconfigure_successful": "Configuration updated successfully"
     }
   },
