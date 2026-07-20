@@ -74,3 +74,10 @@ The reconfigure form also accepts a new live-data interval. The allowed range is
 This interval controls live inverter, battery, meter, and dongle-warning data. Device inventory, identity, network details, schedules, and other settings refresh separately every hour. Supported setting changes also request a metadata refresh so their entities can update without waiting for the next hourly cycle.
 
 The integration serializes all requests to the dongle, so its live-data pollers and writes do not overlap. Short intervals still add load and can cause slow or failed updates. After three consecutive full failures, the affected live-data poller waits at least 10 minutes between attempts; it returns to your configured interval after a successful update.
+
+## Remove The Integration
+
+1. Open **Settings > Devices & services**.
+2. Open the **Solplanet** integration menu and select **Delete**.
+3. If you installed it with HACS, remove the custom repository. If you installed it manually, delete `custom_components/solplanet` from the Home Assistant configuration directory.
+4. Restart Home Assistant.

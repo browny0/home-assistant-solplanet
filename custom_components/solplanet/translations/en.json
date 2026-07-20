@@ -5,6 +5,10 @@
         "data": {
           "host": "Solplanet inverter IP address / host",
           "interval": "Live data update interval (seconds)"
+        },
+        "data_description": {
+          "host": "The local IP address or hostname of the Solplanet network dongle.",
+          "interval": "Seconds between live telemetry updates."
         }
       },
       "dhcp_confirm": {
@@ -17,6 +21,10 @@
         "data": {
           "host": "Solplanet dongle IP address / host",
           "interval": "Live data update interval (seconds)"
+        },
+        "data_description": {
+          "host": "The new local IP address or hostname of the same Solplanet network dongle.",
+          "interval": "Seconds between live telemetry updates."
         }
       }
     },
@@ -39,6 +47,9 @@
         "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
         "data": {
           "interval": "Live data update interval (seconds)"
+        },
+        "data_description": {
+          "interval": "Seconds between live telemetry updates."
         }
       }
     }
