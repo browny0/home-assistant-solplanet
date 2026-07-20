@@ -6,6 +6,14 @@
   ],
   "config_flow": true,
   "dependencies": [],
+  "dhcp": [
+    {
+      "macaddress": "C0482F2*"
+    },
+    {
+      "registered_devices": true
+    }
+  ],
   "documentation": "https://github.com/calvinbui/home-assistant-solplanet",
   "integration_type": "hub",
   "iot_class": "local_polling",

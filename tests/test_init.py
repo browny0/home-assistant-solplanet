@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 
 import custom_components.solplanet as integration
 from custom_components.solplanet.const import (
@@ -99,6 +100,8 @@ def test_register_devices_covers_all_inventory_types() -> None:
                         "brd": "Solplanet",
                         "mod": "WiFi Stick",
                         "psn": "DG-SERIAL",
+                        "ethmac": "AA-BB-CC-DD-EE-FF",
+                        "wlanmac": "122233445566",
                         "hw": "H1",
                         "sw": "S1",
                     }
@@ -118,7 +121,11 @@ def test_register_devices_covers_all_inventory_types() -> None:
             },
         }
     )
-    entry = SimpleNamespace(entry_id="entry-id", runtime_data=runtime)
+    entry = SimpleNamespace(
+        data={CONF_MAC: "788899AABBCC"},
+        entry_id="entry-id",
+        runtime_data=runtime,
+    )
     registry = _registry()
 
     integration._register_devices(registry, entry)
@@ -126,6 +133,11 @@ def test_register_devices_covers_all_inventory_types() -> None:
     assert registry.async_get_or_create.call_count == 7
     calls = [call.kwargs for call in registry.async_get_or_create.call_args_list]
     assert calls[0]["name"] == "Roof gateway"
+    assert calls[0]["connections"] == {
+        (dr.CONNECTION_NETWORK_MAC, "aa:bb:cc:dd:ee:ff"),
+        (dr.CONNECTION_NETWORK_MAC, "12:22:33:44:55:66"),
+        (dr.CONNECTION_NETWORK_MAC, "78:88:99:aa:bb:cc"),
+    }
     assert calls[1]["name"] == "Solplanet Dongle"
     assert calls[2]["sw_version"] == "Master: M1, Slave: S1, Security: T1"
     assert calls[3]["name"] == "ASW2.5S-LB-G1"
@@ -195,6 +207,7 @@ def test_register_devices_preserves_uncertain_dongle_and_meter_entries() -> None
         tsw="T1",
     )
     entry = SimpleNamespace(
+        data={CONF_MAC: "AABBCCDDEEFF"},
         entry_id="entry-id",
         runtime_data=SimpleNamespace(
             data={
@@ -214,6 +227,9 @@ def test_register_devices_preserves_uncertain_dongle_and_meter_entries() -> None
 
     integration._register_devices(registry, entry)
 
+    assert registry.async_get_or_create.call_args.kwargs["connections"] == {
+        (dr.CONNECTION_NETWORK_MAC, "aa:bb:cc:dd:ee:ff")
+    }
     registry.async_update_device.assert_called_once_with(
         device_id="stale-battery",
         remove_config_entry_id="entry-id",

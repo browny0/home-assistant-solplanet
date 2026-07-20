@@ -8,7 +8,7 @@ from datetime import timedelta
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
+from homeassistant.const import CONF_HOST, CONF_MAC, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -39,6 +39,7 @@ from .coordinator import (
     SolplanetRuntimeData,
 )
 from .services import async_setup_services
+from .validation import normalize_mac_address
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -52,6 +53,15 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
 
 type SolplanetConfigEntry = ConfigEntry[SolplanetRuntimeData]
+
+
+def _network_mac_connections(*mac_addresses: str | None) -> set[tuple[str, str]]:
+    """Return normalized device-registry connections for available MAC addresses."""
+    return {
+        (dr.CONNECTION_NETWORK_MAC, normalized_mac)
+        for mac_address in mac_addresses
+        if (normalized_mac := normalize_mac_address(mac_address)) is not None
+    }
 
 
 def _current_device_identifiers(
@@ -137,11 +147,20 @@ def _register_devices(
     """Create or update device-registry entries from the metadata cache."""
     data = entry.runtime_data.data
     current_identifiers = _current_device_identifiers(entry)
+    configured_mac = getattr(entry, "data", {}).get(CONF_MAC)
+    first_dongle_id = next(iter(data[DONGLE_IDENTIFIER]), None)
+    first_inverter_id = next(iter(data[INVERTER_IDENTIFIER]), None)
 
     for dongle_id, dongle_entry in data[DONGLE_IDENTIFIER].items():
         dongle = dongle_entry.get("data", {}) or {}
+        connections = _network_mac_connections(
+            dongle.get("ethmac"),
+            dongle.get("wlanmac"),
+            configured_mac if dongle_id == first_dongle_id else None,
+        )
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
+            connections=connections,
             identifiers={(DOMAIN, f"{DONGLE_IDENTIFIER}_{dongle_id}")},
             name=dongle.get("nam") or "Solplanet Dongle",
             manufacturer=dongle.get("brd") or dongle.get("muf") or MANUFACTURER,
@@ -153,8 +172,14 @@ def _register_devices(
 
     for inverter_id, inverter_entry in data[INVERTER_IDENTIFIER].items():
         inverter_info = inverter_entry["info"]
+        connections = _network_mac_connections(
+            configured_mac
+            if first_dongle_id is None and inverter_id == first_inverter_id
+            else None
+        )
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
+            connections=connections,
             identifiers={(DOMAIN, inverter_id)},
             name=inverter_info.model,
             model=inverter_info.model,

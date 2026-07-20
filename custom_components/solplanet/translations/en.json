@@ -7,6 +7,10 @@
           "interval": "Live data update interval (seconds)"
         }
       },
+      "dhcp_confirm": {
+        "title": "Set up Solplanet",
+        "description": "Set up the Solplanet device discovered at {host}?"
+      },
       "reconfigure": {
         "title": "Reconfigure Solplanet",
         "description": "Set live telemetry polling (10-3600 seconds). Device metadata and settings update hourly.",
@@ -21,6 +25,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "cannot_connect": "Cannot connect to the discovered device",
+      "unknown": "Unexpected error during discovery",
       "reconfigure_successful": "Configuration updated successfully"
     }
   },

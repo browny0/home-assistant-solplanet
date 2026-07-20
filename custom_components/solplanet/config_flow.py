@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ipaddress import ip_address
 import logging
 from typing import Any
 
@@ -12,14 +13,17 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .api_adapter import SolplanetApiAdapter
 from .client import SolplanetClient
 from .const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN, MAX_INTERVAL, MIN_INTERVAL
+from .validation import normalize_mac_address
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +55,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     # Prefer a stable hardware identifier for the config entry unique_id.
     # Using host/IP as the unique_id causes duplicate entries when the IP/DNS changes.
     unique_id: str | None = None
+    mac_addresses: set[str] = set()
     # Keep the config entry title user-driven (host/hostname they entered).
     # Use dongle identity only for the backend unique_id.
     title = data[CONF_HOST]
@@ -59,7 +64,22 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     if api.version == "v2":
         try:
             dongle = await api.client.get("getdev.cgi")
-            unique_id = dongle.get("psn") or dongle.get("ethmac") or dongle.get("wlanmac")
+            ethmac = dongle.get("ethmac")
+            wlanmac = dongle.get("wlanmac")
+            normalized_ethmac = normalize_mac_address(ethmac)
+            normalized_wlanmac = normalize_mac_address(wlanmac)
+            unique_id = dongle.get("psn") or (
+                ethmac
+                if normalized_ethmac is not None
+                else wlanmac
+                if normalized_wlanmac is not None
+                else None
+            )
+            mac_addresses = {
+                mac_address
+                for mac_address in (normalized_ethmac, normalized_wlanmac)
+                if mac_address is not None
+            }
             # Do not override the title with dongle metadata; keep the user-provided host.
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Failed to read dongle identity: %s", err, exc_info=True)
@@ -75,7 +95,18 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     return {
         "title": title,
         "unique_id": unique_id,
+        "mac_addresses": mac_addresses,
+        "inverter_count": len(inverter_info.inv),
     }
+
+
+def _host_is_ip_address(host: Any) -> bool:
+    """Return whether a configured host is a literal IP address."""
+    try:
+        ip_address(host)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -83,6 +114,28 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     MINOR_VERSION = 2
+
+    _discovered_data: dict[str, Any]
+    _discovered_title: str
+
+    def _entry_for_mac(self, mac: str) -> ConfigEntry | None:
+        """Return the configured Solplanet entry linked to a network MAC."""
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get_device(
+            connections={(dr.CONNECTION_NETWORK_MAC, mac)}
+        )
+        if device is None:
+            return None
+        return next(
+            (
+                entry
+                for entry_id in device.config_entries
+                if (entry := self.hass.config_entries.async_get_entry(entry_id))
+                is not None
+                and entry.domain == DOMAIN
+            ),
+            None,
+        )
 
     @staticmethod
     def async_get_options_flow(
@@ -115,6 +168,77 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=schema,
+        )
+
+    async def async_step_dhcp(
+        self,
+        discovery_info: DhcpServiceInfo,
+    ) -> ConfigFlowResult:
+        """Handle DHCP discovery and update a configured device's address."""
+        host = discovery_info.ip
+        if (mac := normalize_mac_address(discovery_info.macaddress)) is None:
+            return self.async_abort(reason="cannot_connect")
+        data = {CONF_HOST: host, CONF_INTERVAL: DEFAULT_INTERVAL}
+
+        try:
+            info = await validate_input(self.hass, data)
+        except CannotConnect:
+            return self.async_abort(reason="cannot_connect")
+        except Exception:
+            _LOGGER.exception("Unexpected exception during DHCP discovery")
+            return self.async_abort(reason="unknown")
+
+        unique_id = info["unique_id"]
+        if (
+            not isinstance(unique_id, str)
+            or not unique_id.strip()
+            or not info["inverter_count"]
+            or (
+                info["mac_addresses"]
+                and mac not in info["mac_addresses"]
+            )
+        ):
+            return self.async_abort(reason="cannot_connect")
+
+        existing_entry = await self.async_set_unique_id(unique_id)
+        existing_entry = existing_entry or self._entry_for_mac(mac)
+        if existing_entry is not None:
+            updates = {CONF_MAC: mac}
+            existing_host = existing_entry.data.get(CONF_HOST)
+            updated_title = existing_entry.title
+            if _host_is_ip_address(existing_host):
+                updates[CONF_HOST] = host
+                if existing_entry.title == existing_host:
+                    updated_title = host
+            return self.async_update_reload_and_abort(
+                existing_entry,
+                unique_id=unique_id,
+                title=updated_title,
+                data_updates=updates,
+                reason="already_configured",
+                reload_even_if_entry_is_unchanged=False,
+            )
+
+        self._discovered_data = {**data, CONF_MAC: mac}
+        self._discovered_title = info["title"]
+        self.context["title_placeholders"] = {"name": self._discovered_title}
+        return await self.async_step_dhcp_confirm()
+
+    async def async_step_dhcp_confirm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Confirm a DHCP-discovered Solplanet device."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self._discovered_title,
+                data=self._discovered_data,
+            )
+
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="dhcp_confirm",
+            description_placeholders={"host": self._discovered_data[CONF_HOST]},
         )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

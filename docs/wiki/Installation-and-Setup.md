@@ -28,6 +28,10 @@ If you are moving from another Solplanet custom integration, remove the old repo
 
 ## Add Your System
 
+Home Assistant can automatically discover newer dongles that use AISWEI's registered network hardware range. If a **Solplanet** discovery card appears, select **Add**, verify the displayed address, and confirm setup. Older dongles may use third-party network hardware and still need manual setup.
+
+To add the integration manually:
+
 1. Open **Settings > Devices & services**.
 2. Select **Add integration**.
 3. Search for **Solplanet**.
@@ -35,13 +39,15 @@ If you are moving from another Solplanet custom integration, remove the old repo
 5. Leave the live data update interval at 60 seconds for your first setup.
 6. Submit the form and wait for the first update to finish.
 
-We automatically try the supported HTTPS and HTTP connection methods. When setup succeeds, we create devices for the inverter and any batteries, meters, or dongles that the system reports. The integration checks the device inventory hourly, so newly reported devices and newly exposed entities can appear without restarting Home Assistant. If a previously discovered device disappears from the inventory, its entities become unavailable rather than being deleted.
+We automatically try the supported HTTPS and HTTP connection methods. When setup succeeds, we create devices for the inverter and any batteries, meters, or dongles that the system reports. The integration checks the device inventory hourly, so newly reported devices and newly exposed entities can appear without restarting Home Assistant. Devices confirmed absent from a successful inventory are removed from this config entry; devices omitted by an uncertain dongle or meter response are preserved.
+
+The integration registers the dongle's available network MAC addresses with Home Assistant. Later DHCP discovery can therefore recognize the same configured system: a changed literal IP address is updated and the integration reloads automatically, while a hostname you entered is preserved.
 
 After setup, open the new Solplanet devices and confirm that power and state-of-charge values update. Some values from sleeping hardware may show `unknown`; see [Troubleshooting](Troubleshooting) if the integration itself is unavailable.
 
 ## Find The Dongle Address
 
-The easiest method is usually your router's connected-device or DHCP page. Look for a Solplanet/Aiswei device, then create a DHCP reservation so its address does not change.
+The easiest method is usually your router's connected-device or DHCP page. Look for a Solplanet/Aiswei device. A DHCP reservation remains useful, especially for older dongles that cannot be identified automatically.
 
 You can also use the Solplanet app:
 

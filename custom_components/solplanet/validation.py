@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+
+from homeassistant.helpers.device_registry import format_mac
+
 
 _BATTERY_ZERO_STUB_FIELDS = (
     "cst",
@@ -13,6 +17,26 @@ _BATTERY_ZERO_STUB_FIELDS = (
     "cli",
     "clo",
 )
+_MAC_ADDRESS_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\Z")
+_INVALID_MAC_ADDRESSES = {
+    "00:00:00:00:00:00",
+    "ff:ff:ff:ff:ff:ff",
+}
+
+
+def normalize_mac_address(value: object) -> str | None:
+    """Return a usable normalized network MAC address."""
+    if not isinstance(value, str) or not value:
+        return None
+
+    normalized = format_mac(value)
+    if (
+        not _MAC_ADDRESS_PATTERN.fullmatch(normalized)
+        or normalized in _INVALID_MAC_ADDRESSES
+        or int(normalized[:2], 16) & 1
+    ):
+        return None
+    return normalized
 
 
 def is_zero_filled_battery_payload(data: object) -> bool:

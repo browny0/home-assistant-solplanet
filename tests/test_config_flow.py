@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.solplanet as integration
@@ -21,7 +25,7 @@ from custom_components.solplanet.config_flow import (
     SolplanetOptionsFlow,
     validate_input,
 )
-from custom_components.solplanet.const import CONF_INTERVAL, DOMAIN
+from custom_components.solplanet.const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN
 
 from tests.helpers import FakeCoordinator, integration_data
 
@@ -38,13 +42,28 @@ def user_input() -> dict:
     return {CONF_HOST: "inverter.local", CONF_INTERVAL: 60}
 
 
-def _entry(*, interval: int = 60, unique_id: str = "dongle-serial") -> MockConfigEntry:
+def _entry(
+    *,
+    host: str = "old.local",
+    interval: int = 60,
+    unique_id: str = "dongle-serial",
+    title: str | None = None,
+) -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_HOST: "old.local", CONF_INTERVAL: interval},
-        title="old.local",
+        data={CONF_HOST: host, CONF_INTERVAL: interval},
+        title=title or host,
         unique_id=unique_id,
     )
+
+
+def _dhcp_info(
+    *,
+    ip: str = "192.0.2.20",
+    mac: str = "c0482f200001",
+) -> DhcpServiceInfo:
+    """Return representative Solplanet DHCP discovery data."""
+    return DhcpServiceInfo(ip=ip, hostname="aiswei-device", macaddress=mac)
 
 
 def test_interval_schema_accepts_defaults_and_supported_bounds() -> None:
@@ -90,18 +109,28 @@ async def test_validate_input_v2_prefers_dongle_identity(hass, user_input) -> No
         assert await validate_input(hass, user_input) == {
             "title": "inverter.local",
             "unique_id": "PSN-1",
+            "mac_addresses": set(),
+            "inverter_count": 1,
         }
 
 
 @pytest.mark.parametrize(
-    ("identity", "expected"),
+    ("identity", "expected", "expected_mac"),
     [
-        ({"ethmac": "AA:BB"}, "AA:BB"),
-        ({"wlanmac": "CC:DD"}, "CC:DD"),
+        (
+            {"ethmac": "AA:BB:CC:DD:EE:FF"},
+            "AA:BB:CC:DD:EE:FF",
+            "aa:bb:cc:dd:ee:ff",
+        ),
+        (
+            {"wlanmac": "CCDDEEFF0011"},
+            "CCDDEEFF0011",
+            "cc:dd:ee:ff:00:11",
+        ),
     ],
 )
 async def test_validate_input_v2_identity_fallbacks(
-    hass, user_input, identity, expected
+    hass, user_input, identity, expected, expected_mac
 ) -> None:
     """V2 uses either wired or wireless MAC when PSN is absent."""
     api = SimpleNamespace(
@@ -118,6 +147,7 @@ async def test_validate_input_v2_identity_fallbacks(
     ):
         result = await validate_input(hass, user_input)
     assert result["unique_id"] == expected
+    assert result["mac_addresses"] == {expected_mac}
 
 
 async def test_validate_input_falls_back_to_inverter_or_host(hass, user_input) -> None:
@@ -137,7 +167,12 @@ async def test_validate_input_falls_back_to_inverter_or_host(hass, user_input) -
         ),
     ):
         result = await validate_input(hass, user_input)
-    assert result == {"title": "INV-1", "unique_id": "INV-1"}
+    assert result == {
+        "title": "INV-1",
+        "unique_id": "INV-1",
+        "mac_addresses": set(),
+        "inverter_count": 1,
+    }
 
     api.version = "v1"
     api.get_inverter_info.return_value = SimpleNamespace(inv=[])
@@ -149,7 +184,12 @@ async def test_validate_input_falls_back_to_inverter_or_host(hass, user_input) -
         ),
     ):
         result = await validate_input(hass, user_input)
-    assert result == {"title": "inverter.local", "unique_id": "inverter.local"}
+    assert result == {
+        "title": "inverter.local",
+        "unique_id": "inverter.local",
+        "mac_addresses": set(),
+        "inverter_count": 0,
+    }
 
 
 async def test_validate_input_wraps_connection_errors(hass, user_input) -> None:
@@ -217,6 +257,262 @@ async def test_user_flow_reports_validation_errors(
         )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": reason}
+
+
+def test_manifest_enables_verified_dhcp_discovery_and_registered_updates() -> None:
+    """The manifest supports current AISWEI hardware and configured MACs."""
+    manifest = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "custom_components"
+            / "solplanet"
+            / "manifest.json"
+        ).read_text()
+    )
+    assert manifest["dhcp"] == [
+        {"macaddress": "C0482F2*"},
+        {"registered_devices": True},
+    ]
+
+
+async def test_dhcp_discovery_requires_confirmation_and_creates_entry(hass) -> None:
+    """A verified unconfigured DHCP device is offered for confirmation."""
+    discovery_info = _dhcp_info()
+    normalized_mac = "c0:48:2f:20:00:01"
+
+    with patch(
+        "custom_components.solplanet.config_flow.validate_input",
+        AsyncMock(
+            return_value={
+                "title": discovery_info.ip,
+                "unique_id": "PSN-1",
+                "mac_addresses": {normalized_mac},
+                "inverter_count": 1,
+            }
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=discovery_info,
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "dhcp_confirm"
+    assert result["description_placeholders"] == {"host": discovery_info.ip}
+
+    with patch.object(
+        integration,
+        "async_setup_entry",
+        AsyncMock(return_value=True),
+    ):
+        created = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+    assert created["type"] is FlowResultType.CREATE_ENTRY
+    assert created["title"] == discovery_info.ip
+    assert created["data"] == {
+        CONF_HOST: discovery_info.ip,
+        CONF_INTERVAL: DEFAULT_INTERVAL,
+        CONF_MAC: normalized_mac,
+    }
+    assert created["result"].unique_id == "PSN-1"
+
+
+@pytest.mark.parametrize(
+    ("configured_host", "configured_title", "expected_host", "expected_title"),
+    [
+        ("192.0.2.10", "192.0.2.10", "192.0.2.20", "192.0.2.20"),
+        ("192.0.2.10", "Roof inverter", "192.0.2.20", "Roof inverter"),
+        ("inverter.local", "inverter.local", "inverter.local", "inverter.local"),
+    ],
+)
+async def test_dhcp_updates_only_literal_ip_hosts_for_known_device(
+    hass,
+    configured_host: str,
+    configured_title: str,
+    expected_host: str,
+    expected_title: str,
+) -> None:
+    """Rediscovery updates IPs while preserving hostnames and custom titles."""
+    entry = _entry(
+        host=configured_host,
+        interval=90,
+        unique_id="PSN-1",
+        title=configured_title,
+    )
+    entry.add_to_hass(hass)
+    discovery_info = _dhcp_info()
+    normalized_mac = "c0:48:2f:20:00:01"
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(
+                return_value={
+                    "title": discovery_info.ip,
+                    "unique_id": "PSN-1",
+                    "mac_addresses": {normalized_mac},
+                    "inverter_count": 1,
+                }
+            ),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_schedule_reload",
+            Mock(),
+        ) as schedule_reload,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=discovery_info,
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data == {
+        CONF_HOST: expected_host,
+        CONF_INTERVAL: 90,
+        CONF_MAC: normalized_mac,
+    }
+    assert entry.title == expected_title
+    schedule_reload.assert_called_once_with(entry.entry_id)
+
+
+async def test_dhcp_uses_registered_mac_to_upgrade_legacy_unique_id(hass) -> None:
+    """An exact registry MAC safely links entries created with a legacy ID."""
+    entry = _entry(host="192.0.2.10", interval=90, unique_id="192.0.2.10")
+    entry.add_to_hass(hass)
+    discovery_info = _dhcp_info()
+    normalized_mac = "c0:48:2f:20:00:01"
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        connections={(dr.CONNECTION_NETWORK_MAC, normalized_mac)},
+        identifiers={(DOMAIN, "INV-1")},
+    )
+
+    with (
+        patch(
+            "custom_components.solplanet.config_flow.validate_input",
+            AsyncMock(
+                return_value={
+                    "title": discovery_info.ip,
+                    "unique_id": "PSN-1",
+                    "mac_addresses": set(),
+                    "inverter_count": 1,
+                }
+            ),
+        ),
+        patch.object(hass.config_entries, "async_schedule_reload", Mock()),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=discovery_info,
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.unique_id == "PSN-1"
+    assert entry.title == discovery_info.ip
+    assert entry.data == {
+        CONF_HOST: discovery_info.ip,
+        CONF_INTERVAL: 90,
+        CONF_MAC: normalized_mac,
+    }
+
+
+@pytest.mark.parametrize(
+    ("validated", "reason"),
+    [
+        (
+            {
+                "title": "192.0.2.20",
+                "unique_id": "PSN-1",
+                "mac_addresses": {"00:11:22:33:44:55"},
+                "inverter_count": 1,
+            },
+            "cannot_connect",
+        ),
+        (
+            {
+                "title": "192.0.2.20",
+                "unique_id": "PSN-1",
+                "mac_addresses": set(),
+                "inverter_count": 0,
+            },
+            "cannot_connect",
+        ),
+        (
+            {
+                "title": "192.0.2.20",
+                "unique_id": "",
+                "mac_addresses": set(),
+                "inverter_count": 1,
+            },
+            "cannot_connect",
+        ),
+    ],
+)
+async def test_dhcp_rejects_mismatched_or_non_inverter_devices(
+    hass,
+    validated: dict,
+    reason: str,
+) -> None:
+    """The broad vendor matcher cannot configure an unverified product."""
+    with patch(
+        "custom_components.solplanet.config_flow.validate_input",
+        AsyncMock(return_value=validated),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=_dhcp_info(),
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (CannotConnect(), "cannot_connect"),
+        (RuntimeError("surprise"), "unknown"),
+    ],
+)
+async def test_dhcp_aborts_when_probe_fails(hass, error: Exception, reason: str) -> None:
+    """Failed DHCP probes do not change configuration."""
+    with patch(
+        "custom_components.solplanet.config_flow.validate_input",
+        AsyncMock(side_effect=error),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=_dhcp_info(),
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
+
+
+async def test_dhcp_rejects_placeholder_mac_before_probing(hass) -> None:
+    """Placeholder interface MACs cannot identify a discovered device."""
+    with patch(
+        "custom_components.solplanet.config_flow.validate_input",
+        AsyncMock(),
+    ) as validate:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_DHCP},
+            data=_dhcp_info(mac="000000000000"),
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "cannot_connect"
+    validate.assert_not_awaited()
 
 
 async def test_options_flow_shows_current_value_and_updates_entry(hass) -> None:
