@@ -3,7 +3,7 @@
 import logging
 from collections import abc
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast, override
 
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -41,7 +41,7 @@ def get_entity_unique_id(description: SolplanetEntityDescription, device_id: str
     return f"solplanet_{description.data_field_device_type}_{device_id}_{suffix}"
 
 
-class SolplanetEntity(CoordinatorEntity, Entity):
+class SolplanetEntity(CoordinatorEntity[SolplanetDataUpdateCoordinator], Entity):
     """Base class for Solplanet entities backed by the coordinator.
 
     Notes:
@@ -78,6 +78,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
         self._set_native_value()
 
     @callback
+    @override
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         self._set_native_value()
@@ -134,7 +135,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
         if data is not None and self.entity_description.data_field_value_multiply is not None:
             data = data * self.entity_description.data_field_value_multiply
 
-        return data
+        return cast(float | int | str | None, data)
 
     def has_value_in_response(self) -> bool:
         """Return if entity has a non-None value in the latest coordinator payload.
@@ -148,6 +149,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
             return False
 
     @property
+    @override
     def available(self) -> bool:
         """Return entity availability.
 
@@ -161,6 +163,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
         )
 
     @property
+    @override
     def device_info(self) -> DeviceInfo:
         """Return device information about this sensor."""
         return (
@@ -179,6 +182,7 @@ class SolplanetEntity(CoordinatorEntity, Entity):
         )
 
     @property
+    @override
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional state attributes."""
         if not self.entity_description.attributes_fn:

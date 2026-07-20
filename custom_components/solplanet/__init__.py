@@ -7,7 +7,6 @@ from datetime import timedelta
 
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MAC, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -32,6 +31,7 @@ from .const import (
 )
 from .coordinator import (
     SolplanetBatteryUpdateCoordinator,
+    SolplanetConfigEntry,
     SolplanetDongleUpdateCoordinator,
     SolplanetInverterUpdateCoordinator,
     SolplanetMetadataUpdateCoordinator,
@@ -51,9 +51,6 @@ PLATFORMS: list[Platform] = [
 ]
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
-
-type SolplanetConfigEntry = ConfigEntry[SolplanetRuntimeData]
-
 
 def _network_mac_connections(*mac_addresses: str | None) -> set[tuple[str, str]]:
     """Return normalized device-registry connections for available MAC addresses."""
@@ -369,7 +366,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) -
     return unload_ok
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+async def async_migrate_entry(
+    hass: HomeAssistant, config_entry: SolplanetConfigEntry
+) -> bool:
     """Migrate old entry."""
     _LOGGER.debug(
         "Migrating configuration from version %s.%s",

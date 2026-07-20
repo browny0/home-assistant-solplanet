@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from collections import abc
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, override
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -34,10 +34,12 @@ class SolplanetButton(SolplanetEntity, ButtonEntity):
 
     entity_description: SolplanetButtonEntityDescription
 
+    @override
     def _set_native_value(self) -> None:
         """Buttons do not have state."""
         return
 
+    @override
     async def async_press(self) -> None:
         """Handle the button press."""
         await self.entity_description.callback()

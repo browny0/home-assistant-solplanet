@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
     UnitOfApparentPower,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
@@ -26,7 +27,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -78,7 +78,9 @@ class SolplanetSensor(SolplanetEntity, SensorEntity):
         super().__init__(description=description, isn=isn, coordinator=coordinator)
 
 
-def _create_mppt_power_mapper(index: int) -> abc.Callable:
+def _create_mppt_power_mapper(
+    index: int,
+) -> abc.Callable[[GetInverterDataResponse], float | None]:
     def map_mppt_power(data: GetInverterDataResponse) -> float | None:
         if data.ipv and data.vpv:
             current = data.ipv[index] or 0
@@ -89,8 +91,10 @@ def _create_mppt_power_mapper(index: int) -> abc.Callable:
     return map_mppt_power
 
 
-def _create_dict_mapper(dictionary: dict, default: str = "Unknown (code: {value})") -> abc.Callable:
-    def map_dict(value: str | int) -> str:
+def _create_dict_mapper(
+    dictionary: abc.Mapping[int, str], default: str = "Unknown (code: {value})"
+) -> abc.Callable[[int], str]:
+    def map_dict(value: int) -> str:
         return dictionary.get(value, default.replace("{value}", str(value)))
 
     return map_dict
@@ -102,8 +106,8 @@ def _create_dict_set_mapper(
     errors: list[dict[int, str]],
     none_value: str,
     default: str = "Unknown (code: {value})",
-):
-    def map_set_dict(data: dict[str, int]) -> str:
+) -> abc.Callable[[Any], str]:
+    def map_set_dict(data: Any) -> str:
         messages: list[str] = []
         for idx, field in enumerate(fields):
             value = getattr(data, field)
@@ -393,7 +397,7 @@ def create_meter_entities_description(
     # V2: meters are sourced from `POST /getting.cgi` and stored under `app_data`.
     # V1: meters come from the legacy endpoints and are stored under `data`/`info`.
     if isinstance(meter_entry, dict) and "app_data" in meter_entry:
-        sensors: list[SolplanetSensorEntityDescription] = [
+        app_sensors: list[SolplanetSensorEntityDescription] = [
             SolplanetSensorEntityDescription(
                 key=f"{isn}_power",
                 translation_key="meter_power",
@@ -527,20 +531,20 @@ def create_meter_entities_description(
         def _power_limit_control(req: Any) -> str | None:
             if not isinstance(req, dict):
                 return None
-            regulate = req.get("regulate")
-            try:
-                regulate_i = int(regulate)
-            except (TypeError, ValueError):
-                regulate_i = None
 
+            def _as_int(value: Any) -> int | None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+
+            regulate_i = _as_int(req.get("regulate"))
             if regulate_i != 10:
                 return "Disabled"
 
-            ctrl = req.get("ctrlType")
-            try:
-                ctrl_i = int(ctrl)
-            except (TypeError, ValueError):
-                ctrl_i = None
+            ctrl_i = _as_int(req.get("ctrlType"))
+            if ctrl_i is None:
+                return "Enabled (unknown type)"
 
             return {
                 0: "Limit power",
@@ -548,7 +552,7 @@ def create_meter_entities_description(
                 2: "Zero power",
             }.get(ctrl_i, "Enabled (unknown type)")
 
-        sensors.append(
+        app_sensors.append(
             SolplanetSensorEntityDescription(
                 key=f"{isn}_power_limit_control",
                 translation_key="power_limit_control",
@@ -562,7 +566,7 @@ def create_meter_entities_description(
             )
         )
 
-        return sensors
+        return app_sensors
 
     # V2 sub-meters discovered via app-protocol are represented as devices (via app_info) but may
     # not have any live data yet. Do not create placeholder entities.

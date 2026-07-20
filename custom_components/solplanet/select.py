@@ -3,12 +3,12 @@
 import logging
 from collections import abc
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast, override
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -55,15 +55,18 @@ class SolplanetSelect(SolplanetEntity, SelectEntity):
         self._refresh_options()
 
     @callback
+    @override
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         super()._handle_coordinator_update()
         self._refresh_options()
 
+    @override
     def _set_native_value(self) -> None:
         super()._set_native_value()
         self._attr_current_option = self._attr_native_value
 
+    @override
     async def async_select_option(self, option: str) -> None:
         """Handle the option selection."""
         item = next((x for x in self._select_options if x.label == option), None)
@@ -110,6 +113,17 @@ def create_battery_entities_description(
 
         return [SolplanetSelectOption(label=_format_led_color_label(i), value=i) for i in sorted(indices)]
 
+    def _get_led_color_attributes(settings: Any) -> dict[str, Any]:
+        if not isinstance(settings, dict):
+            return {"index": None, "hex": None}
+
+        index = settings.get("led_color_index")
+        color = LED_COLOR_MAP.get(cast(int, index))
+        return {
+            "index": index,
+            "hex": color.get("hex") if color is not None else None,
+        }
+
     battery_info = coordinator.data[BATTERY_IDENTIFIER][isn].get("info")
     has_led = (
         (battery_info.muf, battery_info.mod) in BATTERY_MODELS_WITH_LED
@@ -148,14 +162,7 @@ def create_battery_entities_description(
                 get_options=_get_led_color_options,
                 callback=lambda option: coordinator.set_battery_led_color_index(int(option.value)),
                 data_field_value_mapper=lambda v: _format_led_color_label(int(v)) if v is not None else None,
-                attributes_fn=lambda ms: {
-                    "index": ms.get("led_color_index") if isinstance(ms, dict) else None,
-                    "hex": (
-                        LED_COLOR_MAP.get(ms.get("led_color_index"), {}).get("hex")
-                        if isinstance(ms, dict)
-                        else None
-                    ),
-                },
+                attributes_fn=_get_led_color_attributes,
             )
         )
 

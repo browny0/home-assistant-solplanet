@@ -2,20 +2,22 @@
 
 import logging
 from dataclasses import dataclass
+from typing import cast, override
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
 from .client import BatterySchedule
 from .const import BATTERY_IDENTIFIER, DISCOVERY_SIGNAL, INVERTER_IDENTIFIER
+from .coordinator import SolplanetDataUpdateCoordinator
 from .entity import SolplanetEntity, SolplanetEntityDescription
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,19 +38,22 @@ class SolplanetBinarySensor(SolplanetEntity, BinarySensorEntity):
         self,
         description: SolplanetBinarySensorEntityDescription,
         isn: str,
-        coordinator,
+        coordinator: SolplanetDataUpdateCoordinator,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(description=description, isn=isn, coordinator=coordinator)
         self._attr_is_on = None  # Initialize the binary sensor state
 
     @property
+    @override
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
-        return self._get_value_from_coordinator()
+        return cast(bool | None, self._get_value_from_coordinator())
 
 
-def create_battery_binary_sensors(coordinator, isn: str) -> list[SolplanetBinarySensorEntityDescription]:
+def create_battery_binary_sensors(
+    coordinator: SolplanetDataUpdateCoordinator, isn: str
+) -> list[SolplanetBinarySensorEntityDescription]:
     """Create binary sensors for battery."""
 
     def value_mapper(raw: object) -> bool | None:
@@ -81,7 +86,9 @@ def create_battery_binary_sensors(coordinator, isn: str) -> list[SolplanetBinary
     ]
 
 
-def create_inverter_binary_sensors(coordinator, isn: str) -> list[SolplanetBinarySensorEntityDescription]:
+def create_inverter_binary_sensors(
+    coordinator: SolplanetDataUpdateCoordinator, isn: str
+) -> list[SolplanetBinarySensorEntityDescription]:
     """Create binary sensors for inverter."""
     return [
         SolplanetBinarySensorEntityDescription(

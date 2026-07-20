@@ -3,6 +3,11 @@
 import contextlib
 import enum
 import struct
+from typing import cast
+
+
+type ModbusResponse = dict[str, int] | int | str | list[int | None] | None
+type ModbusRequestValue = int | str | None
 
 
 class DataType(enum.Enum):
@@ -59,7 +64,11 @@ class ModbusRtuFrameGenerator:
         return self._generate_frame(device_id, 0x04, register_offset, register_length)
 
     def generate_write_single_holding_register_frame(
-        self, device_id: int, register_address: int, value, data_type: DataType
+        self,
+        device_id: int,
+        register_address: int,
+        value: ModbusRequestValue,
+        data_type: DataType,
     ) -> str:
         """Generate Modbus RTU frame for Write Single Holding Register function (Function Code: 0x06)."""
         register_offset = register_address - 40001
@@ -113,7 +122,7 @@ class ModbusRtuFrameGenerator:
 
     def decode_response(
         self, response_hex: str, data_type: DataType
-    ) -> dict | int | str | list[int | None] | None:
+    ) -> ModbusResponse:
         """Decode Modbus RTU response based on function code and data type."""
         response = bytes.fromhex(response_hex)
 
@@ -173,7 +182,7 @@ class ModbusRtuFrameGenerator:
             values: list[int | None] = []
             for i in range(0, len(data), 2):
                 raw = struct.unpack(">H", data[i : i + 2])[0]
-                values.append(self._decode_value(raw, data_type))
+                values.append(cast(int | None, self._decode_value(raw, data_type)))
             return values
 
         # Handle different data types based on length requirements
@@ -213,9 +222,9 @@ class ModbusRtuFrameGenerator:
 
         # Handle signed types
         if data_type == DataType.S16:
-            return struct.unpack(">h", struct.pack(">H", raw_value))[0]
+            return int(struct.unpack(">h", struct.pack(">H", raw_value))[0])
         if data_type == DataType.S32:
-            return struct.unpack(">i", struct.pack(">I", raw_value))[0]
+            return int(struct.unpack(">i", struct.pack(">I", raw_value))[0])
 
         # Handle string type
         if data_type == DataType.STRING:
@@ -276,7 +285,7 @@ class ModbusRtuFrameGenerator:
                     crc >>= 1
         return crc
 
-    def encode_request_data(self, value, data_type: DataType) -> int:
+    def encode_request_data(self, value: ModbusRequestValue, data_type: DataType) -> int:
         """Encode value to appropriate format for Modbus RTU request."""
         # Handle None values (NaN)
         if value is None:
@@ -284,8 +293,9 @@ class ModbusRtuFrameGenerator:
 
         # Validate value range for numeric types
         if data_type in self.VALUE_RANGES:
+            numeric_value = cast(int, value)
             min_val, max_val = self.VALUE_RANGES[data_type]
-            if not (min_val <= value <= max_val):
+            if not (min_val <= numeric_value <= max_val):
                 raise ValueError(f"Value for type {data_type.value} must be in range {min_val}-{max_val}")
 
         # Process based on data type
@@ -297,15 +307,15 @@ class ModbusRtuFrameGenerator:
             DataType.U32,
         ]:
             # All unsigned types just return the value
-            return value
+            return cast(int, value)
 
         if data_type == DataType.S16:
             # Convert signed 16-bit to unsigned representation
-            return struct.unpack(">H", struct.pack(">h", value))[0]
+            return int(struct.unpack(">H", struct.pack(">h", value))[0])
 
         if data_type == DataType.S32:
             # Convert signed 32-bit to unsigned representation
-            return struct.unpack(">I", struct.pack(">i", value))[0]
+            return int(struct.unpack(">I", struct.pack(">i", value))[0])
 
         if data_type == DataType.STRING:
             if not isinstance(value, str) or len(value) > 2:

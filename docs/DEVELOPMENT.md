@@ -41,6 +41,16 @@ The initial startup may take a minute or two. You can monitor the startup progre
 - You may need to restart Home Assistant to see some changes take effect
 - Use the VS Code terminal to run commands inside the dev container
 
+## Validation
+
+Install the development dependencies and run the same typing and coverage gates used for changes:
+
+```bash
+python -m pip install -r requirements_test.txt
+python -m mypy custom_components/solplanet
+pytest -q --cov --cov-report=term-missing
+```
+
 ## Troubleshooting
 
 - If Home Assistant fails to start, check the terminal output for error messages

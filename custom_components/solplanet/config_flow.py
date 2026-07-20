@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 import logging
-from typing import Any
+from typing import Any, cast, override
 
 import voluptuous as vol
 from homeassistant.config_entries import (
-    ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -20,6 +19,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
+from . import SolplanetConfigEntry
 from .api_adapter import SolplanetApiAdapter
 from .client import SolplanetClient
 from .const import (
@@ -125,7 +125,7 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
     _discovered_data: dict[str, Any]
     _discovered_title: str
 
-    def _entry_for_mac(self, mac: str) -> ConfigEntry | None:
+    def _entry_for_mac(self, mac: str) -> SolplanetConfigEntry | None:
         """Return the configured Solplanet entry linked to a network MAC."""
         device_registry = dr.async_get(self.hass)
         device = device_registry.async_get_device(
@@ -133,18 +133,21 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         if device is None:
             return None
-        return next(
-            (
-                entry
-                for entry_id in device.config_entries
-                if (entry := self.hass.config_entries.async_get_entry(entry_id))
-                is not None
-                and entry.domain == DOMAIN
+        return cast(
+            SolplanetConfigEntry | None,
+            next(
+                (
+                    entry
+                    for entry_id in device.config_entries
+                    if (entry := self.hass.config_entries.async_get_entry(entry_id))
+                    is not None
+                    and entry.domain == DOMAIN
+                ),
+                None,
             ),
-            None,
         )
 
-    def _entry_owns_identity(self, entry: ConfigEntry, unique_id: str) -> bool:
+    def _entry_owns_identity(self, entry: SolplanetConfigEntry, unique_id: str) -> bool:
         """Return whether the device registry links an identity to an entry."""
         expected_identifiers = {
             (DOMAIN, unique_id),
@@ -158,8 +161,9 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
+    @override
     def async_get_options_flow(
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
     ) -> SolplanetOptionsFlow:
         """Get the options flow for this handler."""
         return SolplanetOptionsFlow(config_entry)
@@ -213,6 +217,7 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    @override
     async def async_step_dhcp(
         self,
         discovery_info: DhcpServiceInfo,
@@ -284,6 +289,7 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"host": self._discovered_data[CONF_HOST]},
         )
 
+    @override
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
@@ -308,7 +314,7 @@ class SolplanetConfigFlow(ConfigFlow, domain=DOMAIN):
 class SolplanetOptionsFlow(OptionsFlow):
     """Handle options flow for Solplanet."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
+    def __init__(self, config_entry: SolplanetConfigEntry) -> None:
         """Initialize options flow."""
         # HA exposes OptionsFlow.config_entry as a read-only property in newer versions.
         # Store the entry on our own attribute.

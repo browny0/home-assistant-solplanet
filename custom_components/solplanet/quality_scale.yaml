@@ -69,6 +69,4 @@ rules:
   # Platinum
   async-dependency: done
   inject-websession: done
-  strict-typing:
-    status: todo
-    comment: Strict static type checking has not yet been enabled and audited for the full integration.
+  strict-typing: done

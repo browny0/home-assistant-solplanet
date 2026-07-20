@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -11,15 +13,19 @@ from homeassistant.helpers import entity_registry as er
 from .client import BatterySchedule, ScheduleSlot
 from .const import BATTERY_IDENTIFIER, DOMAIN, METER_IDENTIFIER
 
+type ServiceTarget = Mapping[str, str | list[str]]
+type MeterPayload = dict[str, int]
+type MeterPayloadValidator = Callable[[object, MeterPayload], None]
 
-def _build_target(call: ServiceCall) -> dict:
+
+def _build_target(call: ServiceCall) -> ServiceTarget:
     """
     Extract entity_id/device_id from call.data.
 
     Home Assistant merges any `target:` fields into `call.data` before the
     handler runs; `ServiceCall` itself has no `target` attribute.
     """
-    target: dict = {}
+    target: dict[str, str | list[str]] = {}
     if "entity_id" in call.data:
         target["entity_id"] = call.data["entity_id"]
     if "device_id" in call.data:
@@ -27,13 +33,13 @@ def _build_target(call: ServiceCall) -> dict:
     return target
 
 
-async def get_isn_from_target(hass: HomeAssistant, target: dict) -> list[str]:
+async def get_isn_from_target(hass: HomeAssistant, target: ServiceTarget) -> list[str]:
     """Get ISNs from target entity_ids or device_ids."""
     isns: set[str] = set()
     prefix = f"{BATTERY_IDENTIFIER}_"
     device_reg = dr.async_get(hass)
 
-    def _isn_from_device(device: object) -> str | None:
+    def _isn_from_device(device: dr.DeviceEntry) -> str | None:
         for identifier in device.identifiers:
             if identifier[0] == DOMAIN and identifier[1].startswith(prefix):
                 return identifier[1].removeprefix(prefix)
@@ -59,7 +65,9 @@ async def get_isn_from_target(hass: HomeAssistant, target: dict) -> list[str]:
     return list(isns)
 
 
-async def get_meter_isn_from_target(hass: HomeAssistant, target: dict) -> list[str]:
+async def get_meter_isn_from_target(
+    hass: HomeAssistant, target: ServiceTarget
+) -> list[str]:
     """Get meter serial(s) from target entity_ids or device_ids."""
     isns: set[str] = set()
 
@@ -124,7 +132,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                         )
 
                         # Get existing slots for the day
-                        new_slots = dict(current_schedule)
+                        new_slots: dict[str, list[ScheduleSlot]] = dict(current_schedule)
                         # Validate a copy so a rejected slot cannot mutate the
                         # coordinator's cached schedule in place.
                         day_slots = list(new_slots.get(call.data["day"], []))
@@ -187,7 +195,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     current_schedule = schedule_data.get("slots") or {}
 
                     if call.data["day"] == "all":
-                        new_slots = {day: [] for day in BatterySchedule.DAYS}
+                        new_slots: dict[str, list[ScheduleSlot]] = {
+                            day: [] for day in BatterySchedule.DAYS
+                        }
                     else:
                         # Keep other days unchanged
                         new_slots = dict(current_schedule)
@@ -205,9 +215,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             )
 
     async def _apply_meter_payload(
-        target: dict,
-        payload: dict,
-        validator: callable | None = None,
+        target: ServiceTarget,
+        payload: MeterPayload,
+        validator: MeterPayloadValidator | None = None,
     ) -> None:
         """Apply a meter payload to the targeted main meter device(s)."""
         meter_isns = await get_meter_isn_from_target(hass, target)
@@ -240,7 +250,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         target = _build_target(call)
 
         limit_type = int(call.data["limitType"])
-        payload: dict = {
+        payload: MeterPayload = {
             "regulate": 10,
             "ctrlType": 0,
             "abs": int(call.data["abs"]),
@@ -265,7 +275,9 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 )
             payload["targetPer"] = int(call.data["targetPer"])
 
-        def _validate_power_limits(coordinator: object, payload: dict) -> None:
+        def _validate_power_limits(
+            coordinator: object, payload: MeterPayload
+        ) -> None:
             max_rate = 10000
             if hasattr(coordinator, "get_max_inverter_rate_w"):
                 try:
@@ -297,7 +309,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         """Configure meter current limit mode (ctrlType=1)."""
         target = _build_target(call)
 
-        payload: dict = {
+        payload: MeterPayload = {
             "regulate": 10,
             "ctrlType": 1,
             # Keep vendor defaults explicitly in the payload (these were observed in the app).
@@ -323,7 +335,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         """Configure meter zero power mode (ctrlType=2)."""
         target = _build_target(call)
 
-        payload: dict = {
+        payload: MeterPayload = {
             "regulate": 10,
             "ctrlType": 2,
             "lostTime": int(call.data["lostTime"]),

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, override
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import SolplanetConfigEntry
@@ -37,6 +37,7 @@ class SolplanetSwitch(SolplanetEntity, SwitchEntity):
     entity_description: SolplanetSwitchEntityDescription
 
     @property
+    @override
     def is_on(self) -> bool | None:
         """Return true if the switch is on."""
         try:
@@ -45,10 +46,12 @@ class SolplanetSwitch(SolplanetEntity, SwitchEntity):
         except Exception:  # noqa: BLE001
             return None
 
+    @override
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         await self._call_coordinator(True)
 
+    @override
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         await self._call_coordinator(False)

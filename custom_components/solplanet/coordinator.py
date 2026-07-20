@@ -6,7 +6,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast, override
 
 from aiohttp import ClientResponseError
 from homeassistant.config_entries import ConfigEntry
@@ -17,7 +17,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api_adapter import SolplanetApiAdapter
-from .client import BatterySchedule, BatteryWorkMode, BatteryWorkModes, ScheduleSlot
+from .client import (
+    BatterySchedule,
+    BatteryWorkMode,
+    BatteryWorkModes,
+    GetBatteryInfoResponse,
+    ScheduleSlot,
+)
 from .const import (
     BATTERY_IDENTIFIER,
     DISCOVERY_SIGNAL,
@@ -88,6 +94,9 @@ class SolplanetRuntimeData:
         await self.coordinator.async_request_refresh()
 
 
+type SolplanetConfigEntry = ConfigEntry[SolplanetRuntimeData]
+
+
 class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
     """Base coordinator for one Solplanet endpoint family."""
 
@@ -95,7 +104,7 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
         name: str,
         update_interval: timedelta,
         error_interval: timedelta = FAILED_UPDATE_INTERVAL,
@@ -142,6 +151,7 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
 
         return max(rates) if rates else 10000
 
+    @override
     async def _async_update_data(self) -> SolplanetData:
         """Fetch one endpoint family while serializing access to the gateway."""
         async with self.runtime.coordinator_lock:
@@ -476,7 +486,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
     ) -> None:
         """Initialize the hourly metadata coordinator."""
         self._new_device_ids: dict[str, set[str]] = {}
@@ -489,6 +499,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
             error_interval=METADATA_UPDATE_INTERVAL,
         )
 
+    @override
     async def _async_update_data(self) -> SolplanetData:
         """Refresh metadata, then announce devices first seen by this update."""
         data = await super()._async_update_data()
@@ -513,6 +524,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self._new_device_ids = {}
         return data
 
+    @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh inventory and configuration data."""
         previous_ids = {device_type: set(devices) for device_type, devices in self.runtime.data.items()}
@@ -639,6 +651,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
             entry = dict(previous_entry)
             entry.setdefault("data", None)
 
+            info: GetBatteryInfoResponse | None
             try:
                 info = await self.api.get_battery_info(battery_id)
             except Exception as err:  # noqa: BLE001
@@ -648,7 +661,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
                     err,
                     exc_info=True,
                 )
-                info = previous_entry.get("info")
+                info = cast(GetBatteryInfoResponse | None, previous_entry.get("info"))
 
             entry["info"] = info
             if info is not None:
@@ -774,7 +787,7 @@ class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
     ) -> None:
         """Initialize the inverter coordinator."""
@@ -786,6 +799,7 @@ class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
             update_interval=update_interval,
         )
 
+    @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh live telemetry for all discovered inverters."""
         entries = self.runtime.data[INVERTER_IDENTIFIER]
@@ -820,7 +834,7 @@ class SolplanetBatteryUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
     ) -> None:
         """Initialize the battery coordinator."""
@@ -833,6 +847,7 @@ class SolplanetBatteryUpdateCoordinator(SolplanetDataUpdateCoordinator):
         )
         self._zero_filled_update_count = 0
 
+    @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh live telemetry for all discovered batteries."""
         entries = self.runtime.data[BATTERY_IDENTIFIER]
@@ -888,7 +903,7 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
     ) -> None:
         """Initialize the meter coordinator."""
@@ -900,6 +915,7 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
             update_interval=update_interval,
         )
 
+    @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh app-protocol or legacy meter telemetry."""
         entries = self.runtime.data[METER_IDENTIFIER]
@@ -932,7 +948,7 @@ class SolplanetDongleUpdateCoordinator(SolplanetDataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         runtime: SolplanetRuntimeData,
-        config_entry: ConfigEntry,
+        config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
     ) -> None:
         """Initialize the dongle diagnostics coordinator."""
@@ -944,6 +960,7 @@ class SolplanetDongleUpdateCoordinator(SolplanetDataUpdateCoordinator):
             update_interval=update_interval,
         )
 
+    @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh dongle warnings; HTTP 404 means there are no warnings."""
         entries = self.runtime.data[DONGLE_IDENTIFIER]

@@ -1,7 +1,7 @@
 """Solplanet API Adapter - automatically detects and uses V1 or V2 protocol."""
 
 import logging
-from typing import Literal
+from typing import Literal, cast
 
 from .client import (
     BatteryWorkMode,
@@ -15,13 +15,17 @@ from .client import (
     SolplanetApiV2,
     SolplanetClient,
 )
-from .modbus import DataType
+from .modbus import DataType, ModbusResponse
 
 __author__ = "Zbigniew Motyka"
 __copyright__ = "Zbigniew Motyka"
 __license__ = "MIT"
 
 _LOGGER = logging.getLogger(__name__)
+
+type ApiVersion = Literal["v1", "v2"]
+type ApiScheme = Literal["http", "https"]
+type ApiConfig = tuple[ApiVersion, str, ApiScheme, int]
 
 
 class SolplanetApiAdapter:
@@ -42,7 +46,7 @@ class SolplanetApiAdapter:
         """
         self.client = client
         self._api = api
-        self._version: Literal["v1", "v2"] = "v2" if isinstance(api, SolplanetApiV2) else "v1"
+        self._version: ApiVersion = "v2" if isinstance(api, SolplanetApiV2) else "v1"
 
     @classmethod
     async def create(cls, client: SolplanetClient) -> "SolplanetApiAdapter":
@@ -58,6 +62,7 @@ class SolplanetApiAdapter:
         version = await cls._detect_protocol_version(client)
         _LOGGER.info("Detected Solplanet protocol version: %s", version)
 
+        api: SolplanetApiV1 | SolplanetApiV2
         if version == "v2":
             api = SolplanetApiV2(client)
         else:
@@ -68,11 +73,11 @@ class SolplanetApiAdapter:
     @staticmethod
     async def _detect_protocol_version(
         client: SolplanetClient,
-    ) -> Literal["v1", "v2"]:
+    ) -> ApiVersion:
         """Detect which protocol version the inverter supports."""
 
         # API version configurations: (version_name, endpoint, scheme, port)
-        api_configs = [
+        api_configs: list[ApiConfig] = [
             ("v2", "getdev.cgi?device=2", "https", 443),
             ("v2", "getdev.cgi?device=2", "http", 8484),
             ("v1", "invinfo.cgi", "http", 8484),
@@ -92,13 +97,15 @@ class SolplanetApiAdapter:
         raise RuntimeError("Failed to detect any supported protocol version")
 
     @property
-    def version(self) -> Literal["v1", "v2"]:
+    def version(self) -> ApiVersion:
         """Get detected protocol version."""
         return self._version
 
-    def _supports_battery_operations(self) -> bool:
-        """Check if the current API version supports battery operations."""
-        return self._version == "v2"
+    def _v2_api(self) -> SolplanetApiV2:
+        """Return the V2 API or reject operations unsupported by V1."""
+        if self._version != "v2":
+            raise NotImplementedError("Battery operations are not supported in V1 protocol")
+        return cast(SolplanetApiV2, self._api)
 
     # ========================================================================
     # Delegated API methods - Common to both V1 and V2
@@ -155,9 +162,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        return await self._api.get_battery_data(sn)
+        return await self._v2_api().get_battery_data(sn)
 
     async def get_battery_info(self, sn: str) -> GetBatteryInfoResponse:
         """Get battery info.
@@ -171,9 +176,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        return await self._api.get_battery_info(sn)
+        return await self._v2_api().get_battery_info(sn)
 
     async def set_battery_work_mode(self, sn: str, mode: BatteryWorkMode) -> None:
         """Set battery work mode.
@@ -181,9 +184,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_battery_work_mode(sn, mode)
+        await self._v2_api().set_battery_work_mode(sn, mode)
 
     async def set_battery_soc_min(self, sn: str, soc_min: int) -> None:
         """Set battery minimum SOC.
@@ -191,9 +192,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_battery_soc_min(sn, soc_min)
+        await self._v2_api().set_battery_soc_min(sn, soc_min)
 
     async def set_battery_soc_max(self, sn: str, soc_max: int) -> None:
         """Set battery maximum SOC.
@@ -201,9 +200,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_battery_soc_max(sn, soc_max)
+        await self._v2_api().set_battery_soc_max(sn, soc_max)
 
     async def get_schedule(self) -> dict:
         """Get battery schedule configuration.
@@ -211,9 +208,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        return await self._api.get_schedule()
+        return await self._v2_api().get_schedule()
 
     async def set_schedule_power(self, pin: int | None = None, pout: int | None = None) -> None:
         """Set battery schedule power configuration.
@@ -221,9 +216,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_schedule_power(pin, pout)
+        await self._v2_api().set_schedule_power(pin, pout)
 
     async def set_schedule_pin(self, pin: int) -> None:
         """Set battery schedule pin configuration.
@@ -231,9 +224,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_schedule_pin(pin)
+        await self._v2_api().set_schedule_pin(pin)
 
     async def set_schedule_pout(self, pout: int) -> None:
         """Set battery schedule pout configuration.
@@ -241,9 +232,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_schedule_pout(pout)
+        await self._v2_api().set_schedule_pout(pout)
 
     async def set_schedule_slots(self, schedule: dict) -> None:
         """Set battery schedule configuration directly with raw schedule.
@@ -251,9 +240,7 @@ class SolplanetApiAdapter:
         Raises:
             NotImplementedError: If battery operations are not supported (V1 protocol)
         """
-        if not self._supports_battery_operations():
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
-        await self._api.set_schedule_slots(schedule)
+        await self._v2_api().set_schedule_slots(schedule)
 
     # ========================================================================
     # Modbus methods (delegated to underlying API)
@@ -265,7 +252,7 @@ class SolplanetApiAdapter:
         device_address: int,
         register_address: int,
         register_count: int = 1,
-    ) -> dict | int | str | list[int | None] | None:
+    ) -> ModbusResponse:
         """Read modbus holding registers."""
         return await self._api.modbus_read_holding_registers(
             data_type, device_address, register_address, register_count
@@ -278,7 +265,7 @@ class SolplanetApiAdapter:
         register_address: int,
         value: int,
         dry_run: bool = False,
-    ) -> dict | int | str | None:
+    ) -> ModbusResponse:
         """Write modbus single holding register."""
         return await self._api.modbus_write_single_holding_register(
             data_type, device_address, register_address, value, dry_run
@@ -290,7 +277,7 @@ class SolplanetApiAdapter:
         register_address: int,
         values: list[int],
         dry_run: bool = False,
-    ) -> dict | str | None:
+    ) -> ModbusResponse:
         """Write multiple modbus holding registers (function 0x10)."""
         return await self._api.modbus_write_multiple_holding_registers(
             device_address=device_address,
@@ -305,7 +292,7 @@ class SolplanetApiAdapter:
         device_address: int,
         register_address: int,
         register_count: int = 1,
-    ) -> dict | int | str | list[int | None] | None:
+    ) -> ModbusResponse:
         """Read modbus input registers."""
         return await self._api.modbus_read_input_registers(
             data_type, device_address, register_address, register_count

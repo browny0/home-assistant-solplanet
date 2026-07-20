@@ -9,15 +9,15 @@ This module contains:
 
 import asyncio
 import base64
-from dataclasses import asdict, is_dataclass, dataclass, fields
+from dataclasses import asdict, dataclass, fields, is_dataclass
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
 
-from .modbus import DataType, ModbusRtuFrameGenerator
+from .modbus import DataType, ModbusResponse, ModbusRtuFrameGenerator
 
 __author__ = "Zbigniew Motyka"
 __copyright__ = "Zbigniew Motyka"
@@ -66,7 +66,9 @@ class SolplanetClient:
     async def post(self, endpoint: str, data: Any) -> Any:
         """Make POST request to specified endpoint."""
         # Allow dataclass request models
-        payload: Any = asdict(data) if is_dataclass(data) else data
+        payload: Any = (
+            asdict(data) if is_dataclass(data) and not isinstance(data, type) else data
+        )
         return await self._request("POST", endpoint, json_payload=payload)
 
     async def _request(
@@ -144,7 +146,7 @@ class ModbusApiMixin:
         device_address: int,
         register_address: int,
         register_count: int = 1,
-    ) -> dict | int | str | list[int | None] | None:
+    ) -> ModbusResponse:
         """Read modbus holding registers."""
         frame = ModbusRtuFrameGenerator().generate_read_holding_register_frame(
             device_id=device_address,
@@ -160,7 +162,7 @@ class ModbusApiMixin:
         register_address: int,
         value: int,
         dry_run: bool = False,
-    ) -> dict | int | str | None:
+    ) -> ModbusResponse:
         """Write modbus single holding register (function 0x06)."""
         frame = ModbusRtuFrameGenerator().generate_write_single_holding_register_frame(
             device_id=device_address,
@@ -187,7 +189,7 @@ class ModbusApiMixin:
         register_address: int,
         values: list[int],
         dry_run: bool = False,
-    ) -> dict | str | None:
+    ) -> ModbusResponse:
         """Write modbus multiple holding registers (function 0x10).
 
         The official app uses 0x10 even for single-register writes for the battery "More Settings"
@@ -217,7 +219,7 @@ class ModbusApiMixin:
         device_address: int,
         register_address: int,
         register_count: int = 1,
-    ) -> dict | int | str | list[int | None] | None:
+    ) -> ModbusResponse:
         """Read modbus input registers."""
         frame = ModbusRtuFrameGenerator().generate_read_input_register_frame(
             device_id=device_address,
@@ -230,7 +232,7 @@ class ModbusApiMixin:
         self,
         frame: str,
         data_type: DataType,
-    ) -> dict | int | str | None:
+    ) -> ModbusResponse:
         """Send modbus frame via fdbg.cgi endpoint."""
         start_time = time.time()
         response = await self.client.post("fdbg.cgi", {"data": frame})
@@ -244,7 +246,10 @@ class ModbusApiMixin:
         if not isinstance(response, dict) or "data" not in response:
             raise RuntimeError(f"Unexpected Modbus response from fdbg.cgi: {response!r}")
 
-        data = ModbusRtuFrameGenerator().decode_response(response_hex=response["data"], data_type=data_type)
+        response_frame = cast(str, response["data"])
+        data = ModbusRtuFrameGenerator().decode_response(
+            response_hex=response_frame, data_type=data_type
+        )
         _LOGGER.debug("Modbus RTU response decoded: %s", data)
 
         return data
@@ -960,9 +965,11 @@ class SolplanetApiV1(ModbusApiMixin):
         response = await self.client.get("pwrlim.cgi")
         return self._create_class_from_dict(GetMeterInfoResponse, response)
 
-    def _create_class_from_dict(self, cls, data: dict):
+    def _create_class_from_dict[T](
+        self, cls: type[T], data: dict[str, Any]
+    ) -> T:
         """Create dataclass instance from dict."""
-        allowed = {f.name for f in fields(cls)}
+        allowed = {f.name for f in fields(cast(Any, cls))}
         return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
@@ -1123,9 +1130,11 @@ class SolplanetApiV2(ModbusApiMixin):
             if rsp.get("dat") is not None and rsp.get("dat") != "ok":
                 raise RuntimeError(f"Schedule update failed: {rsp}")
 
-    def _create_class_from_dict(self, cls, data: dict):
+    def _create_class_from_dict[T](
+        self, cls: type[T], data: dict[str, Any]
+    ) -> T:
         """Create dataclass instance from dict."""
-        allowed = {f.name for f in fields(cls)}
+        allowed = {f.name for f in fields(cast(Any, cls))}
         return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
