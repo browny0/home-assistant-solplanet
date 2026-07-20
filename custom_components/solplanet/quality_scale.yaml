@@ -58,9 +58,7 @@ rules:
   entity-device-class: done
   entity-disabled-by-default: done
   entity-translations: done
-  exception-translations:
-    status: todo
-    comment: Dynamic service and device-operation exception messages still need translation keys.
+  exception-translations: done
   icon-translations: done
   reconfiguration-flow: done
   repair-issues:

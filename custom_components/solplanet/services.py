@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import logging
-
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .client import BatterySchedule, ScheduleSlot
 from .const import BATTERY_IDENTIFIER, DOMAIN, METER_IDENTIFIER
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def _build_target(call: ServiceCall) -> dict:
@@ -103,7 +100,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         isns = await get_isn_from_target(hass, target)
         if not isns:
-            raise vol.Invalid("No valid entities or devices found")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_valid_battery_targets",
+            )
 
         processed = False
         for isn in isns:
@@ -130,7 +130,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                         day_slots = list(new_slots.get(call.data["day"], []))
 
                         if len(day_slots) >= 6:
-                            raise vol.Invalid("Cannot add more than 6 slots per day")
+                            raise ServiceValidationError(
+                                translation_domain=DOMAIN,
+                                translation_key="schedule_slot_limit",
+                            )
 
                         day_slots.append(slot)
                         ScheduleSlot.validate_slots(
@@ -144,14 +147,25 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
                     except ValueError as err:
                         # Handle validation errors only (overlaps, duration, midnight crossing)
-                        raise vol.Invalid(str(err)) from err
+                        raise ServiceValidationError(
+                            translation_domain=DOMAIN,
+                            translation_key="invalid_schedule",
+                            translation_placeholders={"error": str(err)},
+                        ) from err
                     except (KeyError, ConnectionError, TimeoutError) as err:
                         # Handle specific API/network errors
-                        _LOGGER.error("Failed to access inverter: %s", err)
-                        raise vol.Invalid(f"Communication error: {err}") from err
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN,
+                            translation_key="communication_error",
+                            translation_placeholders={"error": str(err)},
+                        ) from err
 
         if not processed:
-            raise vol.Invalid(f"No valid battery coordinator found for ISNs {isns}")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="battery_coordinator_not_found",
+                translation_placeholders={"identifiers": ", ".join(sorted(isns))},
+            )
 
     async def clear_schedule(call: ServiceCall) -> None:
         """Handle clear_schedule service."""
@@ -159,7 +173,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         isns = await get_isn_from_target(hass, target)
         if not isns:
-            raise vol.Invalid("No valid entities or devices found")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_valid_battery_targets",
+            )
 
         processed = False
         for isn in isns:
@@ -181,7 +198,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     break
 
         if not processed:
-            raise vol.Invalid(f"No valid battery coordinator found for ISNs {isns}")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="battery_coordinator_not_found",
+                translation_placeholders={"identifiers": ", ".join(sorted(isns))},
+            )
 
     async def _apply_meter_payload(
         target: dict,
@@ -191,7 +212,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         """Apply a meter payload to the targeted main meter device(s)."""
         meter_isns = await get_meter_isn_from_target(hass, target)
         if not meter_isns:
-            raise vol.Invalid("No valid meter entities or devices found")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_valid_meter_targets",
+            )
 
         processed = False
         for meter_isn in meter_isns:
@@ -205,7 +229,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     break
 
         if not processed:
-            raise vol.Invalid(f"No valid meter coordinator found for meters {meter_isns}")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="meter_coordinator_not_found",
+                translation_placeholders={"identifiers": ", ".join(sorted(meter_isns))},
+            )
 
     async def set_meter_limit_power(call: ServiceCall) -> None:
         """Configure meter power limit mode (ctrlType=0)."""
@@ -224,11 +252,17 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         if limit_type == 0:
             if call.data.get("target") is None:
-                raise vol.Invalid("target is required when limitType=0 (Absolute W)")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="absolute_power_target_required",
+                )
             payload["target"] = int(call.data["target"])
         else:
             if call.data.get("targetPer") is None:
-                raise vol.Invalid("targetPer is required when limitType=1 (Percent)")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="percentage_power_target_required",
+                )
             payload["targetPer"] = int(call.data["targetPer"])
 
         def _validate_power_limits(coordinator: object, payload: dict) -> None:
@@ -243,11 +277,19 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             if payload.get("limitType") == 0:
                 target_w = int(payload.get("target") or 0)
                 if target_w > max_rate:
-                    raise vol.Invalid(f"target must be <= inverter rated power ({max_rate} W)")
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="target_exceeds_rated_power",
+                        translation_placeholders={"max_rate": str(max_rate)},
+                    )
 
             lost_w = int(payload.get("lostPowerMax") or 0)
             if lost_w > max_rate:
-                raise vol.Invalid(f"lostPowerMax must be <= inverter rated power ({max_rate} W)")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="lost_power_exceeds_rated_power",
+                    translation_placeholders={"max_rate": str(max_rate)},
+                )
 
         await _apply_meter_payload(target, payload, validator=_validate_power_limits)
 
@@ -270,7 +312,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         # The inverter expects lostCurrMax in range [0..maxOutCurr].
         if payload["lostCurrMax"] > payload["maxOutCurr"]:
-            raise vol.Invalid("lostCurrMax must be <= maxOutCurr")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="lost_current_exceeds_output_current",
+            )
 
         await _apply_meter_payload(target, payload)
 

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from custom_components.solplanet import services
 from custom_components.solplanet.client import BatterySchedule, ScheduleSlot
@@ -38,6 +39,17 @@ def _call(**data):
 
 def _device(*identifiers):
     return SimpleNamespace(identifiers=identifiers)
+
+
+def _assert_translated_exception(
+    error: HomeAssistantError,
+    key: str,
+    placeholders: dict[str, str] | None = None,
+) -> None:
+    """Assert an exception references the Solplanet translation catalog."""
+    assert error.translation_domain == DOMAIN
+    assert error.translation_key == key
+    assert error.translation_placeholders == placeholders
 
 
 def test_build_target_extracts_only_supported_target_fields() -> None:
@@ -194,14 +206,20 @@ async def test_set_schedule_slots_updates_copy_and_validates_failures() -> None:
     handler = registry.handlers["set_schedule_slots"]
 
     with patch.object(services, "get_isn_from_target", AsyncMock(return_value=[])):
-        with pytest.raises(vol.Invalid, match="No valid entities"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_schedule_call())
+    _assert_translated_exception(exc_info.value, "no_valid_battery_targets")
 
     with patch.object(
         services, "get_isn_from_target", AsyncMock(return_value=["missing"])
     ):
-        with pytest.raises(vol.Invalid, match="No valid battery coordinator"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_schedule_call())
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_coordinator_not_found",
+        {"identifiers": "missing"},
+    )
 
     with patch.object(
         services, "get_isn_from_target", AsyncMock(return_value=["bat-1"])
@@ -216,9 +234,16 @@ async def test_set_schedule_slots_updates_copy_and_validates_failures() -> None:
         patch.object(
             services, "get_isn_from_target", AsyncMock(return_value=["bat-1"])
         ),
-        pytest.raises(vol.Invalid, match="overlaps"),
+        pytest.raises(ServiceValidationError) as exc_info,
     ):
         await handler(_schedule_call(start_hour=1))
+    assert exc_info.value.translation_placeholders is not None
+    assert "overlaps" in exc_info.value.translation_placeholders["error"]
+    _assert_translated_exception(
+        exc_info.value,
+        "invalid_schedule",
+        exc_info.value.translation_placeholders,
+    )
     assert len(original_slots["Mon"]) == original_count
 
     original_slots["Mon"] = [ScheduleSlot(index, 0, 1, "charge") for index in range(6)]
@@ -226,9 +251,10 @@ async def test_set_schedule_slots_updates_copy_and_validates_failures() -> None:
         patch.object(
             services, "get_isn_from_target", AsyncMock(return_value=["bat-1"])
         ),
-        pytest.raises(vol.Invalid, match="more than 6"),
+        pytest.raises(ServiceValidationError) as exc_info,
     ):
         await handler(_schedule_call(start_hour=12))
+    _assert_translated_exception(exc_info.value, "schedule_slot_limit")
 
     coordinator.set_battery_schedule_slots.side_effect = ConnectionError("offline")
     original_slots["Mon"] = []
@@ -236,9 +262,15 @@ async def test_set_schedule_slots_updates_copy_and_validates_failures() -> None:
         patch.object(
             services, "get_isn_from_target", AsyncMock(return_value=["bat-1"])
         ),
-        pytest.raises(vol.Invalid, match="Communication error"),
+        pytest.raises(HomeAssistantError) as exc_info,
     ):
         await handler(_schedule_call())
+    assert not isinstance(exc_info.value, ServiceValidationError)
+    _assert_translated_exception(
+        exc_info.value,
+        "communication_error",
+        {"error": "offline"},
+    )
 
 
 async def test_clear_schedule_handles_day_all_missing_and_unmatched_targets() -> None:
@@ -247,14 +279,20 @@ async def test_clear_schedule_handles_day_all_missing_and_unmatched_targets() ->
     handler = registry.handlers["clear_schedule"]
 
     with patch.object(services, "get_isn_from_target", AsyncMock(return_value=[])):
-        with pytest.raises(vol.Invalid, match="No valid entities"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_call(day="Mon"))
+    _assert_translated_exception(exc_info.value, "no_valid_battery_targets")
 
     with patch.object(
         services, "get_isn_from_target", AsyncMock(return_value=["missing"])
     ):
-        with pytest.raises(vol.Invalid, match="No valid battery coordinator"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_call(day="Mon"))
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_coordinator_not_found",
+        {"identifiers": "missing"},
+    )
 
     with patch.object(
         services, "get_isn_from_target", AsyncMock(return_value=["bat-1"])
@@ -302,14 +340,26 @@ async def test_meter_power_handler_builds_absolute_and_percent_payloads() -> Non
         await handler(_power_call(limitType=1, target=None, targetPer=75))
         assert coordinator.set_meter_power_limit.await_args.args[0]["targetPer"] == 75
 
-        with pytest.raises(vol.Invalid, match="target is required"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call(target=None))
-        with pytest.raises(vol.Invalid, match="targetPer is required"):
+        _assert_translated_exception(exc_info.value, "absolute_power_target_required")
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call(limitType=1, target=None))
-        with pytest.raises(vol.Invalid, match="target must be"):
+        _assert_translated_exception(exc_info.value, "percentage_power_target_required")
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call(target=5001))
-        with pytest.raises(vol.Invalid, match="lostPowerMax must be"):
+        _assert_translated_exception(
+            exc_info.value,
+            "target_exceeds_rated_power",
+            {"max_rate": "5000"},
+        )
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call(lostPowerMax=5001))
+        _assert_translated_exception(
+            exc_info.value,
+            "lost_power_exceeds_rated_power",
+            {"max_rate": "5000"},
+        )
 
 
 async def test_meter_power_rate_fallback_and_target_failures() -> None:
@@ -322,19 +372,30 @@ async def test_meter_power_rate_fallback_and_target_failures() -> None:
         services, "get_meter_isn_from_target", AsyncMock(return_value=["meter-1"])
     ):
         await handler(_power_call(target=9999, lostPowerMax=9999))
-        with pytest.raises(vol.Invalid, match="10000 W"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call(target=10001, lostPowerMax=1))
+        _assert_translated_exception(
+            exc_info.value,
+            "target_exceeds_rated_power",
+            {"max_rate": "10000"},
+        )
 
     with patch.object(
         services, "get_meter_isn_from_target", AsyncMock(return_value=[])
     ):
-        with pytest.raises(vol.Invalid, match="No valid meter entities"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call())
+    _assert_translated_exception(exc_info.value, "no_valid_meter_targets")
     with patch.object(
         services, "get_meter_isn_from_target", AsyncMock(return_value=["missing"])
     ):
-        with pytest.raises(vol.Invalid, match="No valid meter coordinator"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await handler(_power_call())
+    _assert_translated_exception(
+        exc_info.value,
+        "meter_coordinator_not_found",
+        {"identifiers": "missing"},
+    )
 
 
 async def test_meter_power_uses_default_rate_without_metadata_helper() -> None:
@@ -361,7 +422,7 @@ async def test_current_zero_and_disable_meter_handlers() -> None:
     )
     with resolve:
         current = registry.handlers["set_meter_limit_current"]
-        with pytest.raises(vol.Invalid, match="lostCurrMax"):
+        with pytest.raises(ServiceValidationError) as exc_info:
             await current(
                 _call(
                     device_id="meter-device",
@@ -372,6 +433,10 @@ async def test_current_zero_and_disable_meter_handlers() -> None:
                     currDiff=1,
                 )
             )
+        _assert_translated_exception(
+            exc_info.value,
+            "lost_current_exceeds_output_current",
+        )
         await current(
             _call(
                 device_id="meter-device",

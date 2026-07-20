@@ -151,7 +151,14 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 self._failed_update_count += 1
                 if self._failed_update_count == MAX_FAILED_UPDATES:
                     self.update_interval = self._error_interval
-                raise UpdateFailed(f"Error fetching Solplanet {self._source_name} data: {err}") from err
+                raise UpdateFailed(
+                    translation_domain=DOMAIN,
+                    translation_key="update_failed",
+                    translation_placeholders={
+                        "source": self._source_name,
+                        "error": str(err),
+                    },
+                ) from err
 
         if self._failed_update_count:
             self._failed_update_count = 0
@@ -176,12 +183,24 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 )
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Modbus operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="modbus_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="inverter_power_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def dongle_sync_time(self) -> None:
         """Sync dongle time (device=1, action=settime) using Home Assistant local time."""
         if self.__api.version != "v2":
-            raise HomeAssistantError("Dongle operations are not supported with V1 protocol")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="dongle_operation_unsupported_v1",
+            )
 
         now = dt_util.now()
         payload = {
@@ -195,12 +214,19 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.client.post("setting.cgi", payload)
             await self.runtime.async_request_metadata_refresh()
         except Exception as err:
-            raise HomeAssistantError(f"Failed to sync dongle time: {err}") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="sync_time_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def dongle_reboot(self) -> None:
         """Reboot dongle (device=1, action=operation, reboot=1)."""
         if self.__api.version != "v2":
-            raise HomeAssistantError("Dongle operations are not supported with V1 protocol")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="dongle_operation_unsupported_v1",
+            )
 
         payload = {
             "device": 1,
@@ -212,7 +238,11 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
             async with self.runtime.coordinator_lock:
                 await self.__api.client.post("setting.cgi", payload)
         except Exception as err:
-            raise HomeAssistantError(f"Failed to reboot dongle: {err}") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="reboot_dongle_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_meter_power_limit(self, payload: dict) -> None:
         """Set meter power limit / zero export configuration (V2 app-protocol).
@@ -221,7 +251,10 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
           POST setting.cgi {"cmd":"set_meter_req","payload":{...}}
         """
         if self.__api.version != "v2":
-            raise HomeAssistantError("Meter power limit control is not supported with V1 protocol")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="meter_power_limit_unsupported_v1",
+            )
 
         try:
             async with self.runtime.coordinator_lock:
@@ -230,14 +263,23 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                     {"cmd": "set_meter_req", "payload": payload},
                 )
 
-            # Expected success response:
-            # {"cmd": "set_meter_rsp", "status": 200}
-            if not isinstance(rsp, dict) or rsp.get("status") != 200:
-                raise HomeAssistantError(f"Unexpected response from set_meter_req: {rsp}")
-
-            self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
         except Exception as err:
-            raise HomeAssistantError(f"Failed to set meter power limit: {err}") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_meter_power_limit_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
+        # Expected success response:
+        # {"cmd": "set_meter_rsp", "status": 200}
+        if not isinstance(rsp, dict) or rsp.get("status") != 200:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_meter_response",
+                translation_placeholders={"response": str(rsp)},
+            )
+
+        self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
 
     async def _write_battery_more_setting(self, register_offset: int, value: int) -> None:
         """Write a battery "More Settings" register via Modbus (function 0x10)."""
@@ -250,7 +292,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 )
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Modbus operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="modbus_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_power(self, on: bool) -> None:
         """Set battery power (offset 1500). 1=on, 0=shutdown."""
@@ -275,7 +326,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_battery_work_mode(sn, mode)
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_soc_min(self, sn: str, value: int) -> None:
         """Set battery soc min."""
@@ -284,7 +344,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_battery_soc_min(sn, value)
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_soc_max(self, sn: str, value: int) -> None:
         """Set battery soc max."""
@@ -293,7 +362,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_battery_soc_max(sn, value)
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_schedule_slots(self, sn: str, slots: dict[str, list[ScheduleSlot]]) -> None:
         """Set battery schedule slots."""
@@ -310,7 +388,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_schedule_slots(raw_schedule)
             self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_schedule_power(self, pin: int | None = None, pout: int | None = None) -> None:
         """Set battery schedule power settings."""
@@ -319,7 +406,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_schedule_power(pin, pout)
             self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_schedule_pin(self, sn: str, pin: int) -> None:
         """Set battery schedule pin."""
@@ -328,7 +424,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_schedule_pin(pin)
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
     async def set_battery_schedule_pout(self, sn: str, pout: int) -> None:
         """Set battery schedule pout."""
@@ -337,7 +442,16 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                 await self.__api.set_schedule_pout(pout)
             await self.runtime.async_request_metadata_refresh()
         except NotImplementedError as err:
-            raise HomeAssistantError("Battery operations are not supported with V1 protocol") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_unsupported_v1",
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="battery_operation_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
 
 def _legacy_meter_payload_looks_valid(meter_data: object) -> bool:

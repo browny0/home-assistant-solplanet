@@ -89,6 +89,41 @@ def test_translation_catalogs_are_complete_and_placeholders_match() -> None:
                 assert set(re.findall(r"\{([^{}]+)\}", name)) == placeholders
 
 
+def test_exception_translation_catalogs_are_complete() -> None:
+    """Every translated runtime exception is present in both English catalogs."""
+    strings = _load_json(COMPONENT_DIR / "strings.json")["exceptions"]
+    english = _load_json(COMPONENT_DIR / "translations" / "en.json")["exceptions"]
+
+    assert english == strings
+    assert set(strings) == {
+        "absolute_power_target_required",
+        "battery_coordinator_not_found",
+        "battery_operation_failed",
+        "battery_operation_unsupported_v1",
+        "communication_error",
+        "dongle_operation_unsupported_v1",
+        "invalid_schedule",
+        "inverter_power_failed",
+        "lost_current_exceeds_output_current",
+        "lost_power_exceeds_rated_power",
+        "meter_coordinator_not_found",
+        "meter_power_limit_unsupported_v1",
+        "modbus_unsupported_v1",
+        "no_valid_battery_targets",
+        "no_valid_meter_targets",
+        "percentage_power_target_required",
+        "protocol_detection_failed",
+        "reboot_dongle_failed",
+        "schedule_slot_limit",
+        "set_meter_power_limit_failed",
+        "sync_time_failed",
+        "target_exceeds_rated_power",
+        "unexpected_meter_response",
+        "update_failed",
+    }
+    assert all(set(entry) == {"message"} for entry in strings.values())
+
+
 def test_icon_translation_keys_reference_translated_entities() -> None:
     """Central icon mappings only reference valid entity translation keys."""
     icons = _load_json(COMPONENT_DIR / "icons.json")["entity"]

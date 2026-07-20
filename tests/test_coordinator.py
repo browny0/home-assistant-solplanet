@@ -16,6 +16,7 @@ from custom_components.solplanet.const import (
     BATTERY_IDENTIFIER,
     CONF_INTERVAL,
     DEFAULT_INTERVAL,
+    DOMAIN,
     DONGLE_IDENTIFIER,
     INVERTER_IDENTIFIER,
     METER_IDENTIFIER,
@@ -80,6 +81,17 @@ def _base_coordinator(
     )
     runtime.metadata_coordinator = SimpleNamespace(async_request_refresh=AsyncMock())
     return hass, api, runtime, coordinator
+
+
+def _assert_translated_exception(
+    error: HomeAssistantError,
+    key: str,
+    placeholders: dict[str, str] | None = None,
+) -> None:
+    """Assert an exception references the Solplanet translation catalog."""
+    assert error.translation_domain == DOMAIN
+    assert error.translation_key == key
+    assert error.translation_placeholders == placeholders
 
 
 @pytest.mark.asyncio
@@ -236,8 +248,13 @@ async def test_base_coordinator_helpers_and_update_contract() -> None:
 
     with pytest.raises(NotImplementedError):
         await coordinator._async_update_runtime_data()
-    with pytest.raises(UpdateFailed, match="Error fetching Solplanet test data"):
+    with pytest.raises(UpdateFailed) as exc_info:
         await coordinator._async_update_data()
+    _assert_translated_exception(
+        exc_info.value,
+        "update_failed",
+        {"source": "test", "error": ""},
+    )
 
 
 @pytest.mark.asyncio
@@ -268,8 +285,18 @@ async def test_inverter_power_write_and_v1_error() -> None:
     runtime.coordinator.async_request_refresh.assert_awaited_once()
 
     api.modbus_write_single_holding_register.side_effect = NotImplementedError
-    with pytest.raises(HomeAssistantError, match="Modbus operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_inverter_power(False)
+    _assert_translated_exception(exc_info.value, "modbus_unsupported_v1")
+
+    api.modbus_write_single_holding_register.side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_inverter_power(False)
+    _assert_translated_exception(
+        exc_info.value,
+        "inverter_power_failed",
+        {"error": "offline"},
+    )
 
 
 @pytest.mark.asyncio
@@ -292,16 +319,28 @@ async def test_dongle_operations() -> None:
     )
 
     api.client.post.side_effect = RuntimeError("offline")
-    with pytest.raises(HomeAssistantError, match="Failed to sync dongle time"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.dongle_sync_time()
-    with pytest.raises(HomeAssistantError, match="Failed to reboot dongle"):
+    _assert_translated_exception(
+        exc_info.value,
+        "sync_time_failed",
+        {"error": "offline"},
+    )
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.dongle_reboot()
+    _assert_translated_exception(
+        exc_info.value,
+        "reboot_dongle_failed",
+        {"error": "offline"},
+    )
 
     _, _, _, v1_coordinator = _base_coordinator(version="v1")
-    with pytest.raises(HomeAssistantError, match="Dongle operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await v1_coordinator.dongle_sync_time()
-    with pytest.raises(HomeAssistantError, match="Dongle operations are not supported"):
+    _assert_translated_exception(exc_info.value, "dongle_operation_unsupported_v1")
+    with pytest.raises(HomeAssistantError) as exc_info:
         await v1_coordinator.dongle_reboot()
+    _assert_translated_exception(exc_info.value, "dongle_operation_unsupported_v1")
 
 
 @pytest.mark.asyncio
@@ -318,15 +357,26 @@ async def test_meter_power_limit_write() -> None:
     runtime.coordinator.async_request_refresh.assert_awaited_once()
 
     api.client.post.return_value = {"status": 500}
-    with pytest.raises(HomeAssistantError, match="Failed to set meter power limit"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_meter_power_limit({})
+    _assert_translated_exception(
+        exc_info.value,
+        "unexpected_meter_response",
+        {"response": "{'status': 500}"},
+    )
     api.client.post.side_effect = RuntimeError("offline")
-    with pytest.raises(HomeAssistantError, match="offline"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_meter_power_limit({})
+    _assert_translated_exception(
+        exc_info.value,
+        "set_meter_power_limit_failed",
+        {"error": "offline"},
+    )
 
     _, _, _, v1_coordinator = _base_coordinator(version="v1")
-    with pytest.raises(HomeAssistantError, match="not supported with V1"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await v1_coordinator.set_meter_power_limit({})
+    _assert_translated_exception(exc_info.value, "meter_power_limit_unsupported_v1")
 
 
 @pytest.mark.asyncio
@@ -361,8 +411,18 @@ async def test_battery_more_setting_v1_error() -> None:
     """Unsupported battery Modbus writes surface a Home Assistant error."""
     _, api, _, coordinator = _base_coordinator(version="v1")
     api.modbus_write_multiple_holding_registers.side_effect = NotImplementedError
-    with pytest.raises(HomeAssistantError, match="Modbus operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_battery_power(False)
+    _assert_translated_exception(exc_info.value, "modbus_unsupported_v1")
+
+    api.modbus_write_multiple_holding_registers.side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_battery_power(False)
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_operation_failed",
+        {"error": "offline"},
+    )
 
 
 @pytest.mark.asyncio
@@ -389,8 +449,18 @@ async def test_battery_api_writes_and_errors(
     runtime.coordinator.async_request_refresh.assert_awaited_once()
 
     getattr(api, api_method).side_effect = NotImplementedError
-    with pytest.raises(HomeAssistantError, match="Battery operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await getattr(coordinator, method_name)(*arguments)
+    _assert_translated_exception(exc_info.value, "battery_operation_unsupported_v1")
+
+    getattr(api, api_method).side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await getattr(coordinator, method_name)(*arguments)
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_operation_failed",
+        {"error": "offline"},
+    )
 
 
 @pytest.mark.asyncio
@@ -413,11 +483,32 @@ async def test_battery_schedule_writes() -> None:
     assert runtime.coordinator.async_request_refresh.await_count == 2
 
     api.get_schedule.side_effect = NotImplementedError
-    with pytest.raises(HomeAssistantError, match="Battery operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_battery_schedule_slots("bat", {})
+    _assert_translated_exception(exc_info.value, "battery_operation_unsupported_v1")
+
+    api.get_schedule.side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_battery_schedule_slots("bat", {})
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_operation_failed",
+        {"error": "offline"},
+    )
+
     api.set_schedule_power.side_effect = NotImplementedError
-    with pytest.raises(HomeAssistantError, match="Battery operations are not supported"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await coordinator.set_battery_schedule_power()
+    _assert_translated_exception(exc_info.value, "battery_operation_unsupported_v1")
+
+    api.set_schedule_power.side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_battery_schedule_power()
+    _assert_translated_exception(
+        exc_info.value,
+        "battery_operation_failed",
+        {"error": "offline"},
+    )
 
 
 @pytest.mark.parametrize(

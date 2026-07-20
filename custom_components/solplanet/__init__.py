@@ -287,8 +287,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) ->
     client = SolplanetClient(entry.data[CONF_HOST], async_get_clientsession(hass))
     try:
         api = await SolplanetApiAdapter.create(client)
-    except RuntimeError as e:
-        raise ConfigEntryNotReady(str(e)) from e
+    except RuntimeError as err:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="protocol_detection_failed",
+            translation_placeholders={"error": str(err)},
+        ) from err
 
     _LOGGER.info("Using Solplanet protocol version: %s", api.version)
 

@@ -405,8 +405,11 @@ async def test_setup_entry_translates_detection_failure() -> None:
             AsyncMock(side_effect=RuntimeError("not ready")),
         ),
     ):
-        with pytest.raises(ConfigEntryNotReady, match="not ready"):
+        with pytest.raises(ConfigEntryNotReady) as exc_info:
             await integration.async_setup_entry(hass, entry)
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "protocol_detection_failed"
+    assert exc_info.value.translation_placeholders == {"error": "not ready"}
 
 
 @pytest.mark.asyncio

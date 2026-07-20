@@ -54,6 +54,80 @@
       }
     }
   },
+  "exceptions": {
+    "absolute_power_target_required": {
+      "message": "Target power is required when using an absolute power limit."
+    },
+    "battery_coordinator_not_found": {
+      "message": "No battery coordinator was found for: {identifiers}"
+    },
+    "battery_operation_failed": {
+      "message": "The battery operation failed: {error}"
+    },
+    "battery_operation_unsupported_v1": {
+      "message": "Battery operations are not supported with the V1 protocol."
+    },
+    "communication_error": {
+      "message": "Communication with the inverter failed: {error}"
+    },
+    "dongle_operation_unsupported_v1": {
+      "message": "Dongle operations are not supported with the V1 protocol."
+    },
+    "invalid_schedule": {
+      "message": "The schedule is invalid: {error}"
+    },
+    "inverter_power_failed": {
+      "message": "Failed to change the inverter power state: {error}"
+    },
+    "lost_current_exceeds_output_current": {
+      "message": "The maximum current after communication loss cannot exceed the maximum output current."
+    },
+    "lost_power_exceeds_rated_power": {
+      "message": "The maximum power after communication loss cannot exceed the inverter rated power ({max_rate} W)."
+    },
+    "meter_coordinator_not_found": {
+      "message": "No meter coordinator was found for: {identifiers}"
+    },
+    "meter_power_limit_unsupported_v1": {
+      "message": "Meter power limit control is not supported with the V1 protocol."
+    },
+    "modbus_unsupported_v1": {
+      "message": "Modbus operations are not supported with the V1 protocol."
+    },
+    "no_valid_battery_targets": {
+      "message": "No valid Solplanet battery entities or devices were selected."
+    },
+    "no_valid_meter_targets": {
+      "message": "No valid Solplanet meter entities or devices were selected."
+    },
+    "percentage_power_target_required": {
+      "message": "Target percentage is required when using a percentage power limit."
+    },
+    "protocol_detection_failed": {
+      "message": "Unable to detect a supported Solplanet protocol: {error}"
+    },
+    "reboot_dongle_failed": {
+      "message": "Failed to reboot the dongle: {error}"
+    },
+    "schedule_slot_limit": {
+      "message": "A schedule cannot contain more than 6 slots per day."
+    },
+    "set_meter_power_limit_failed": {
+      "message": "Failed to set the meter power limit: {error}"
+    },
+    "sync_time_failed": {
+      "message": "Failed to synchronize the dongle time: {error}"
+    },
+    "target_exceeds_rated_power": {
+      "message": "The target power cannot exceed the inverter rated power ({max_rate} W)."
+    },
+    "unexpected_meter_response": {
+      "message": "The dongle returned an unexpected meter power limit response: {response}"
+    },
+    "update_failed": {
+      "message": "Error fetching Solplanet {source} data: {error}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "schedule_configured": { "name": "Schedule configured" },
