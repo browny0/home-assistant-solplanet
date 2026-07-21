@@ -1,6 +1,6 @@
 ---
 
-name: Close stale issues
+name: Close stale issues and pull requests
 
 on:
   schedule:
