@@ -1,6 +1,8 @@
 # Development Guide
 
 This guide will help you set up the development environment for the Solplanet integration.
+It follows Home Assistant's [devcontainer setup](https://developers.home-assistant.io/docs/setup_devcontainer_environment/)
+and [local testing workflow](https://developers.home-assistant.io/docs/apps/testing/).
 
 ## Prerequisites
 
@@ -15,6 +17,9 @@ This guide will help you set up the development environment for the Solplanet in
 1. Open the project folder in Visual Studio Code
 2. When prompted, click "Reopen in Container" (or press `F1` and select "Dev Containers: Reopen in Container")
 3. Wait for the container to build and start (this may take a few minutes on first run)
+
+The container is configured for local Home Assistant development. The repository does not
+start Home Assistant automatically when the container opens; use the task in the next step.
 
 ### 2. Start Home Assistant
 
@@ -50,6 +55,8 @@ python -m pip install -r requirements_test.txt
 python -m mypy custom_components/solplanet
 pytest -q --cov --cov-report=term-missing
 ```
+
+Home Assistant's broader testing guidance is available in [Testing your code](https://developers.home-assistant.io/docs/development_testing/).
 
 ## Troubleshooting
 
