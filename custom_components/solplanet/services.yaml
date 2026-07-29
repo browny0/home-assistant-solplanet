@@ -250,6 +250,40 @@ set_meter_zero_power:
           step: 1
           mode: box
 
+set_compatibility_meter_power_limit:
+  name: Configure power limit control (404 compatibility)
+  description: This is a separate Home Assistant action for firmware with the simpler E-meter power limit page. Use it only when the standard Limit power action returns HTTP 404.
+  fields:
+    device_id:
+      name: Meter device
+      description: Select the main Solplanet meter device.
+      required: true
+      selector:
+        device:
+          integration: solplanet
+    enabled:
+      name: Enable power limit control
+      description: Enable or disable export power limit control.
+      required: true
+      selector:
+        boolean:
+    target_percentage:
+      name: Export power limit setpoint (%)
+      description: Percentage of nominal system power. The supported range observed on compatible firmware is -1% to 10%.
+      required: true
+      selector:
+        number:
+          min: -1
+          max: 10
+          step: 0.01
+          mode: box
+    fail_safe:
+      name: Fail safe
+      description: Enable the firmware's communication-interruption fail-safe setting.
+      required: true
+      selector:
+        boolean:
+
 disable_meter_power_limit:
   name: Disable power limit control
   description: Disable power limit control.

@@ -218,6 +218,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         target: ServiceTarget,
         payload: MeterPayload,
         validator: MeterPayloadValidator | None = None,
+        *,
+        compatibility: bool = False,
     ) -> None:
         """Apply a meter payload to the targeted main meter device(s)."""
         meter_isns = await get_meter_isn_from_target(hass, target)
@@ -234,7 +236,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 if meter_isn in coordinator.data.get(METER_IDENTIFIER, {}):
                     if validator is not None:
                         validator(coordinator, payload)
-                    await coordinator.set_meter_power_limit(payload)
+                    if compatibility:
+                        await coordinator.set_compatibility_meter_power_limit(payload)
+                    else:
+                        await coordinator.set_meter_power_limit(payload)
                     processed = True
                     break
 
@@ -349,6 +354,22 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         await _apply_meter_payload(target, {"regulate": 5})
 
+    async def set_compatibility_meter_power_limit(call: ServiceCall) -> None:
+        """Configure the simpler setmeter power-limit protocol."""
+        target = _build_target(call)
+        payload: MeterPayload = {
+            "enb": 1,
+            "mod": 1,
+            "regulate": 10 if call.data["enabled"] else 5,
+            "power_limit_mode": 0,
+            "com_interruption_enable_g100": 1 if call.data["fail_safe"] else 0,
+            "billing_method": 0,
+            "offset": 0,
+            "target": round(float(call.data["target_percentage"]) * 100),
+            "abs": 0,
+        }
+        await _apply_meter_payload(target, payload, compatibility=True)
+
     # Service schemas stay the same
     hass.services.async_register(
         DOMAIN,
@@ -441,6 +462,23 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             {
                 vol.Required("device_id"): vol.Any(str, [str]),
                 vol.Optional("entity_id"): vol.Any(str, [str]),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "set_compatibility_meter_power_limit",
+        set_compatibility_meter_power_limit,
+        schema=vol.Schema(
+            {
+                vol.Required("device_id"): vol.Any(str, [str]),
+                vol.Optional("entity_id"): vol.Any(str, [str]),
+                vol.Required("enabled"): bool,
+                vol.Required("target_percentage"): vol.All(
+                    vol.Coerce(float), vol.Range(min=-1, max=10)
+                ),
+                vol.Required("fail_safe"): bool,
             }
         ),
     )

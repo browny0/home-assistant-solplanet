@@ -61,8 +61,9 @@ Available actions are:
 | Enable power limit control (Limit current) | `solplanet.set_meter_limit_current` | Limit inverter grid import and export current |
 | Enable power limit control (Zero power) | `solplanet.set_meter_zero_power` | Ask the inverter to avoid grid export |
 | Disable power limit control | `solplanet.disable_meter_power_limit` | Return power-limit control to disabled |
+| Configure power limit control (404 compatibility) | `solplanet.set_compatibility_meter_power_limit` | A separate action for simpler percentage-based firmware; use only when the standard action returns HTTP 404 |
 
-For schedule actions, target the battery's **Schedule Configured** entity. For every power-limit action, select the **main meter device** in the **Meter device** field. An inverter, battery, or dongle will be rejected. A sub-meter is not an independent control target and may send the same system-wide setting, so do not select one.
+For schedule actions, target the battery's **Schedule Configured** entity. For every power-limit action, select the **main meter device** in the **Meter device** field. An inverter, battery, or dongle will be rejected. A sub-meter is not an independent control target and may send the same system-wide setting, so do not select one. **Configure power limit control (404 compatibility)** is a separate Home Assistant action; run it only when the standard **Limit power** action fails with HTTP 404.
 
 See [Battery Modes and Schedules](Battery-Modes-and-Schedules) and [Power Limit Control](Power-Limit-Control) before using these actions in an automation.
 

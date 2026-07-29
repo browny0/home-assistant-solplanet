@@ -373,9 +373,47 @@ async def test_meter_power_limit_write() -> None:
         {"error": "offline"},
     )
 
+    api.client.post.side_effect = ClientResponseError(
+        request_info=Mock(), history=(), status=404, message="Not Found"
+    )
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_meter_power_limit({})
+    _assert_translated_exception(exc_info.value, "meter_power_limit_unavailable")
+
     _, _, _, v1_coordinator = _base_coordinator(version="v1")
     with pytest.raises(HomeAssistantError) as exc_info:
         await v1_coordinator.set_meter_power_limit({})
+    _assert_translated_exception(exc_info.value, "meter_power_limit_unsupported_v1")
+
+
+@pytest.mark.asyncio
+async def test_compatibility_meter_power_limit_write() -> None:
+    """Compatibility writes use setmeter and validate its response."""
+    _, api, runtime, coordinator = _base_coordinator()
+    payload = {"regulate": 10, "target": 500}
+    api.client.post.return_value = {"dat": "ok"}
+
+    await coordinator.set_compatibility_meter_power_limit(payload)
+
+    api.client.post.assert_awaited_once_with(
+        "setting.cgi",
+        {"device": 3, "action": "setmeter", "value": payload},
+    )
+    await asyncio.sleep(0)
+    runtime.coordinator.async_request_refresh.assert_awaited_once()
+
+    api.client.post.return_value = {"dat": "error"}
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_compatibility_meter_power_limit(payload)
+    _assert_translated_exception(
+        exc_info.value,
+        "unexpected_meter_response",
+        {"response": "{'dat': 'error'}"},
+    )
+
+    _, _, _, v1_coordinator = _base_coordinator(version="v1")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await v1_coordinator.set_compatibility_meter_power_limit(payload)
     _assert_translated_exception(exc_info.value, "meter_power_limit_unsupported_v1")
 
 

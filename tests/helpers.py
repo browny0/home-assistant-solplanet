@@ -95,7 +95,16 @@ def integration_data(*, led_battery: bool = True) -> dict[str, dict]:
                     "i_total": 20,
                     "o_total": 30,
                 },
-                "meter_req": {"regulate": 10, "ctrlType": 0},
+                "meter_req": {
+                    "regulate": 10,
+                    "ctrlType": 0,
+                    "abs": 0,
+                    "limitType": 0,
+                    "target": 3000,
+                    "powerDiff": -100,
+                    "lostTime": 60,
+                    "lostPowerMax": 0,
+                },
             }
         },
         DONGLE_IDENTIFIER: {
@@ -140,6 +149,7 @@ class FakeCoordinator:
             "set_battery_sleep_enabled",
             "set_battery_schedule_slots",
             "set_meter_power_limit",
+            "set_compatibility_meter_power_limit",
         ):
             setattr(self, method, AsyncMock())
 

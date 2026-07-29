@@ -80,6 +80,7 @@ Use a conservative fallback value. Do not rely on these fields until you have te
 ## Known Behaviour
 
 - Power Limit Control is available only on supported V2 systems with a main meter.
+- Some firmware exposes a simpler percentage-only E-meter control protocol. **Configure power limit control (404 compatibility)** is a separate Home Assistant action; run it only when the standard **Limit power** action returns HTTP 404.
 - Some systems and firmware combinations have prevented grid or PV battery charging while a limit was active. Other systems on similar firmware have worked normally, so test the exact installation.
 - Some systems have needed the absolute **Export power limit setpoint (W)** set to 0 in **Limit power** mode before the control could be disabled successfully.
 - Three-phase and multi-meter behaviour depends on the installation and firmware. We expose controls only for the main meter.

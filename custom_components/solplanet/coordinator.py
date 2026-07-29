@@ -273,6 +273,17 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
                     {"cmd": "set_meter_req", "payload": payload},
                 )
 
+        except ClientResponseError as err:
+            if err.status == 404:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="meter_power_limit_unavailable",
+                ) from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_meter_power_limit_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
         except Exception as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -283,6 +294,36 @@ class SolplanetDataUpdateCoordinator(DataUpdateCoordinator[SolplanetData]):
         # Expected success response:
         # {"cmd": "set_meter_rsp", "status": 200}
         if not isinstance(rsp, dict) or rsp.get("status") != 200:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_meter_response",
+                translation_placeholders={"response": str(rsp)},
+            )
+
+        self.hass.async_create_task(self.runtime.async_request_metadata_refresh())
+
+    async def set_compatibility_meter_power_limit(self, payload: dict) -> None:
+        """Set the simpler meter power-limit configuration used by some V2 firmware."""
+        if self.__api.version != "v2":
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="meter_power_limit_unsupported_v1",
+            )
+
+        try:
+            async with self.runtime.coordinator_lock:
+                rsp = await self.__api.client.post(
+                    "setting.cgi",
+                    {"device": 3, "action": "setmeter", "value": payload},
+                )
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="set_meter_power_limit_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
+        if not isinstance(rsp, dict) or rsp.get("dat") != "ok":
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="unexpected_meter_response",

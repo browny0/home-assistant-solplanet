@@ -100,6 +100,186 @@ def _create_dict_mapper(
     return map_dict
 
 
+def _power_limit_int(data: Any, field: str) -> int | None:
+    """Return one power-limit field as an integer from a dict or response model."""
+    value = data.get(field) if isinstance(data, dict) else getattr(data, field, None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _power_limit_control(data: Any) -> str | None:
+    """Map both power-limit protocol variants to one control state."""
+    if data is None:
+        return None
+    if _power_limit_int(data, "regulate") != 10:
+        return "Disabled"
+
+    has_ctrl_type = (
+        "ctrlType" in data if isinstance(data, dict) else hasattr(data, "ctrlType")
+    )
+    if not has_ctrl_type:
+        return "Limit power"
+    ctrl_type = _power_limit_int(data, "ctrlType")
+    if ctrl_type is None:
+        return "Enabled (unknown type)"
+    return {
+        0: "Limit power",
+        1: "Limit current",
+        2: "Zero power",
+    }.get(ctrl_type, "Enabled (unknown type)")
+
+
+def _power_limit_enum(field: str, values: dict[int, str]) -> abc.Callable[[Any], str | None]:
+    """Create a mapper for a power-limit enum field."""
+
+    def mapper(data: Any) -> str | None:
+        value = _power_limit_int(data, field)
+        return values.get(value) if value is not None else None
+
+    return mapper
+
+
+def _power_limit_value(
+    field: str,
+    *,
+    when: tuple[str, int] | None = None,
+) -> abc.Callable[[Any], int | None]:
+    """Create a mapper for a value available only in one power-limit mode."""
+
+    def mapper(data: Any) -> int | None:
+        if when is not None and _power_limit_int(data, when[0]) != when[1]:
+            return None
+        return _power_limit_int(data, field)
+
+    return mapper
+
+
+def _power_limit_sensor(
+    isn: str,
+    data_type: str,
+    suffix: str,
+    *,
+    path: list[str | int] | None = None,
+    mapper: abc.Callable[[Any], Any] | None = None,
+    multiplier: float | None = None,
+    unit: str | None = None,
+    device_class: SensorDeviceClass | None = None,
+) -> SolplanetSensorEntityDescription:
+    """Create one meter power-limit diagnostic sensor description."""
+    return SolplanetSensorEntityDescription(
+        key=f"{isn}_{suffix}",
+        translation_key=suffix,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        data_field_device_type=METER_IDENTIFIER,
+        data_field_data_type=data_type,
+        data_field_path=path or [],
+        data_field_value_mapper=mapper,
+        data_field_value_multiply=multiplier,
+        native_unit_of_measurement=unit,
+        device_class=device_class,
+        unique_id_suffix=suffix,
+    )
+
+
+def _create_power_limit_entities_description(
+    isn: str,
+    *,
+    data_type: str,
+    compatibility: bool,
+) -> list[SolplanetSensorEntityDescription]:
+    """Create readable diagnostic entities for either meter-limit protocol."""
+    phase_mode_mapper = _power_limit_enum(
+        "abs", {0: "Phase-balanced", 1: "Phase-specific"}
+    )
+    entities = [
+        _power_limit_sensor(
+            isn,
+            data_type,
+            "power_limit_control",
+            mapper=_power_limit_control,
+            device_class=SensorDeviceClass.ENUM,
+        ),
+        _power_limit_sensor(
+            isn,
+            data_type,
+            "power_limit_phase_mode",
+            mapper=phase_mode_mapper,
+            device_class=SensorDeviceClass.ENUM,
+        ),
+    ]
+
+    if compatibility:
+        entities.append(
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "export_power_limit_setpoint_percentage",
+                path=["exp_m"],
+                multiplier=0.01,
+                unit=PERCENTAGE,
+            )
+        )
+        return entities
+
+    entities.extend(
+        [
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "power_limit_type",
+                mapper=_power_limit_enum(
+                    "limitType", {0: "Absolute power", 1: "Percentage of rated power"}
+                ),
+                device_class=SensorDeviceClass.ENUM,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "export_power_limit_setpoint",
+                mapper=_power_limit_value("target", when=("limitType", 0)),
+                unit=UnitOfPower.WATT,
+                device_class=SensorDeviceClass.POWER,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "export_power_limit_setpoint_percentage",
+                mapper=_power_limit_value("targetPer", when=("limitType", 1)),
+                unit=PERCENTAGE,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "power_limit_setpoint_offset",
+                mapper=_power_limit_value("powerDiff"),
+                unit=UnitOfPower.WATT,
+                device_class=SensorDeviceClass.POWER,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "communication_loss_timeout",
+                path=["lostTime"],
+                unit=UnitOfTime.SECONDS,
+                device_class=SensorDeviceClass.DURATION,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "communication_loss_power_limit",
+                path=["lostPowerMax"],
+                unit=UnitOfPower.WATT,
+                device_class=SensorDeviceClass.POWER,
+            ),
+        ]
+    )
+    return entities
+
+
 def _create_dict_set_mapper(
     length: int,
     fields: list[str],
@@ -526,43 +706,13 @@ def create_meter_entities_description(
             ),
         ]
 
-        # Always create the diagnostic entity. A transient configuration read
-        # during setup should yield Unknown, not permanently omit the entity.
-        def _power_limit_control(req: Any) -> str | None:
-            if not isinstance(req, dict):
-                return None
-
-            def _as_int(value: Any) -> int | None:
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
-                    return None
-
-            regulate_i = _as_int(req.get("regulate"))
-            if regulate_i != 10:
-                return "Disabled"
-
-            ctrl_i = _as_int(req.get("ctrlType"))
-            if ctrl_i is None:
-                return "Enabled (unknown type)"
-
-            return {
-                0: "Limit power",
-                1: "Limit current",
-                2: "Zero power",
-            }.get(ctrl_i, "Enabled (unknown type)")
-
-        app_sensors.append(
-            SolplanetSensorEntityDescription(
-                key=f"{isn}_power_limit_control",
-                translation_key="power_limit_control",
-                entity_category=EntityCategory.DIAGNOSTIC,
-                data_field_device_type=METER_IDENTIFIER,
-                data_field_data_type="meter_req",
-                data_field_path=[],
-                device_class=SensorDeviceClass.ENUM,
-                data_field_value_mapper=_power_limit_control,
-                unique_id_suffix="power_limit_control",
+        # Always create the diagnostics. A transient configuration read during
+        # setup should yield Unknown, not permanently omit the entities.
+        app_sensors.extend(
+            _create_power_limit_entities_description(
+                isn,
+                data_type="meter_req",
+                compatibility=False,
             )
         )
 
@@ -629,6 +779,14 @@ def create_meter_entities_description(
             state_class=SensorStateClass.TOTAL_INCREASING,
         ),
     ]
+
+    sensors.extend(
+        _create_power_limit_entities_description(
+            isn,
+            data_type="info",
+            compatibility=True,
+        )
+    )
 
     return sensors
 

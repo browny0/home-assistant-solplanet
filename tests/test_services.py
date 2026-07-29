@@ -183,6 +183,7 @@ async def _setup_services(coordinator: FakeCoordinator | object | None = None):
         "set_meter_limit_current",
         "set_meter_zero_power",
         "disable_meter_power_limit",
+        "set_compatibility_meter_power_limit",
     }
     return hass, registry, coordinator
 
@@ -472,3 +473,45 @@ async def test_current_zero_and_disable_meter_handlers() -> None:
             _call(device_id="meter-device")
         )
         assert coordinator.set_meter_power_limit.await_args.args[0] == {"regulate": 5}
+
+
+async def test_compatibility_meter_power_handler_builds_setmeter_payload() -> None:
+    """The 404 compatibility action scales percentage and maps its two toggles."""
+    _hass, registry, coordinator = await _setup_services()
+    with patch.object(
+        services, "get_meter_isn_from_target", AsyncMock(return_value=["meter-1"])
+    ):
+        await registry.handlers["set_compatibility_meter_power_limit"](
+            _call(
+                device_id="meter-device",
+                enabled=True,
+                target_percentage=5,
+                fail_safe=False,
+            )
+        )
+        coordinator.set_compatibility_meter_power_limit.assert_awaited_once_with(
+            {
+                "enb": 1,
+                "mod": 1,
+                "regulate": 10,
+                "power_limit_mode": 0,
+                "com_interruption_enable_g100": 0,
+                "billing_method": 0,
+                "offset": 0,
+                "target": 500,
+                "abs": 0,
+            }
+        )
+
+        await registry.handlers["set_compatibility_meter_power_limit"](
+            _call(
+                device_id="meter-device",
+                enabled=False,
+                target_percentage=-0.5,
+                fail_safe=True,
+            )
+        )
+        payload = coordinator.set_compatibility_meter_power_limit.await_args.args[0]
+        assert payload["regulate"] == 5
+        assert payload["target"] == -50
+        assert payload["com_interruption_enable_g100"] == 1

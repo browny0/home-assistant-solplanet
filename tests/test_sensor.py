@@ -66,7 +66,7 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
     """Meter descriptions distinguish V2 main meters, sub-meters and V1 data."""
     coordinator = FakeCoordinator()
     main = sensor.create_meter_entities_description(coordinator, "meter-1")
-    assert len(main) == 12
+    assert len(main) == 19
     limit = next(
         item for item in main if item.unique_id_suffix == "power_limit_control"
     )
@@ -79,15 +79,44 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
     assert mapper({"regulate": 10, "ctrlType": 2}) == "Zero power"
     assert mapper({"regulate": 10, "ctrlType": "bad"}) == "Enabled (unknown type)"
 
+    modern_by_suffix = {item.unique_id_suffix: item for item in main}
+    assert sensor.SolplanetSensor(
+        modern_by_suffix["export_power_limit_setpoint"], "meter-1", coordinator
+    )._attr_native_value == 3000
+    assert sensor.SolplanetSensor(
+        modern_by_suffix["power_limit_phase_mode"], "meter-1", coordinator
+    )._attr_native_value == "Phase-balanced"
+    assert sensor.SolplanetSensor(
+        modern_by_suffix["communication_loss_timeout"], "meter-1", coordinator
+    )._attr_native_value == 60
+
     coordinator.data[METER_IDENTIFIER]["sub-1"] = {"app_info": {"model": 1}}
     assert sensor.create_meter_entities_description(coordinator, "sub-1") == []
 
     coordinator.data[METER_IDENTIFIER]["v1"] = {
         "data": SimpleNamespace(pac=1, iet=2, oet=3, itd=4, otd=5),
-        "info": {},
+        "info": SimpleNamespace(
+            regulate=10,
+            abs=0,
+            exp_m=500,
+            abs_offset=0,
+        ),
     }
     legacy = sensor.create_meter_entities_description(coordinator, "v1")
-    assert len(legacy) == 5
+    assert len(legacy) == 8
+    legacy_by_suffix = {item.unique_id_suffix: item for item in legacy}
+    assert sensor.SolplanetSensor(
+        legacy_by_suffix["power_limit_control"], "v1", coordinator
+    )._attr_native_value == "Limit power"
+    assert sensor.SolplanetSensor(
+        legacy_by_suffix["power_limit_phase_mode"], "v1", coordinator
+    )._attr_native_value == "Phase-balanced"
+    assert sensor.SolplanetSensor(
+        legacy_by_suffix["export_power_limit_setpoint_percentage"],
+        "v1",
+        coordinator,
+    )._attr_native_value == 5
+    assert "export_power_limit_setpoint" not in legacy_by_suffix
 
 
 def test_dongle_and_battery_catalog_mappers() -> None:

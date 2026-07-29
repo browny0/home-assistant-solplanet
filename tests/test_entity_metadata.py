@@ -107,6 +107,7 @@ def test_exception_translation_catalogs_are_complete() -> None:
         "lost_current_exceeds_output_current",
         "lost_power_exceeds_rated_power",
         "meter_coordinator_not_found",
+        "meter_power_limit_unavailable",
         "meter_power_limit_unsupported_v1",
         "modbus_unsupported_v1",
         "no_valid_battery_targets",

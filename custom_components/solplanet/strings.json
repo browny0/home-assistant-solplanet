@@ -91,6 +91,9 @@
     "meter_power_limit_unsupported_v1": {
       "message": "Meter power limit control is not supported with the V1 protocol."
     },
+    "meter_power_limit_unavailable": {
+      "message": "This dongle firmware rejected the standard meter power limit action with HTTP 404. Run the separate Configure power limit control (404 compatibility) action."
+    },
     "modbus_unsupported_v1": {
       "message": "Modbus operations are not supported with the V1 protocol."
     },
@@ -179,6 +182,13 @@
       "total_grid_supplied": { "name": "Total grid supplied" },
       "total_grid_feed_in": { "name": "Total grid feed-in" },
       "power_limit_control": { "name": "Power limit control" },
+      "power_limit_type": { "name": "Power limit type" },
+      "power_limit_phase_mode": { "name": "Power limit phase mode" },
+      "export_power_limit_setpoint": { "name": "Export power limit setpoint" },
+      "export_power_limit_setpoint_percentage": { "name": "Export power limit setpoint percentage" },
+      "power_limit_setpoint_offset": { "name": "Power limit setpoint offset" },
+      "communication_loss_timeout": { "name": "Communication loss timeout" },
+      "communication_loss_power_limit": { "name": "Communication loss power limit" },
       "grid_power": { "name": "Grid power" },
       "grid_energy_in_total": { "name": "Grid energy in total" },
       "grid_energy_out_total": { "name": "Grid energy out total" },
