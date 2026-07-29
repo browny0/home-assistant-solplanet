@@ -253,11 +253,18 @@ def test_translation_metadata_does_not_change_unique_ids() -> None:
         DONGLE_IDENTIFIER: "dongle-1",
     }
 
+    def _device_id(description) -> str:
+        if description.data_field_device_type == METER_IDENTIFIER:
+            for meter_id in ("meter-1", "legacy-meter", "legacy-submeter"):
+                if description.key.startswith(f"{meter_id}_"):
+                    return meter_id
+        return device_ids[description.data_field_device_type]
+
     for domain, descriptions in _catalog().items():
         unique_ids = {
             get_entity_unique_id(
                 description,
-                device_ids[description.data_field_device_type],
+                _device_id(description),
             )
             for description in descriptions
         }

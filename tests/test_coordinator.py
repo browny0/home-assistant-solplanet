@@ -380,6 +380,18 @@ async def test_meter_power_limit_write() -> None:
         await coordinator.set_meter_power_limit({})
     _assert_translated_exception(exc_info.value, "meter_power_limit_unavailable")
 
+    response_error = ClientResponseError(
+        request_info=Mock(), history=(), status=500, message="Server Error"
+    )
+    api.client.post.side_effect = response_error
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_meter_power_limit({})
+    _assert_translated_exception(
+        exc_info.value,
+        "set_meter_power_limit_failed",
+        {"error": str(response_error)},
+    )
+
     _, _, _, v1_coordinator = _base_coordinator(version="v1")
     with pytest.raises(HomeAssistantError) as exc_info:
         await v1_coordinator.set_meter_power_limit({})
@@ -409,6 +421,15 @@ async def test_compatibility_meter_power_limit_write() -> None:
         exc_info.value,
         "unexpected_meter_response",
         {"response": "{'dat': 'error'}"},
+    )
+
+    api.client.post.side_effect = RuntimeError("offline")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await coordinator.set_compatibility_meter_power_limit(payload)
+    _assert_translated_exception(
+        exc_info.value,
+        "set_meter_power_limit_failed",
+        {"error": "offline"},
     )
 
     _, _, _, v1_coordinator = _base_coordinator(version="v1")
