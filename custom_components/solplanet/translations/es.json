@@ -1,0 +1,241 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "host": "Dirección IP / host del inversor Solplanet",
+          "interval": "Intervalo de actualización de datos en vivo (segundos)"
+        },
+        "data_description": {
+          "host": "La dirección IP local o el nombre de host del dongle de red Solplanet.",
+          "interval": "Segundos entre actualizaciones de telemetría en vivo."
+        }
+      },
+      "dhcp_confirm": {
+        "title": "Configurar Solplanet",
+        "description": "¿Configurar el dispositivo Solplanet descubierto en {host}?"
+      },
+      "reconfigure": {
+        "title": "Reconfigurar Solplanet",
+        "description": "Cambia la dirección del dongle y el intervalo de sondeo de telemetría en vivo. La dirección se valida antes de actualizar la configuración.",
+        "data": {
+          "host": "Dirección IP / host del dongle Solplanet",
+          "interval": "Intervalo de actualización de datos en vivo (segundos)"
+        },
+        "data_description": {
+          "host": "La nueva dirección IP local o nombre de host del mismo dongle Solplanet.",
+          "interval": "Segundos entre actualizaciones de telemetría en vivo."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se puede conectar al dispositivo",
+      "unknown": "Error inesperado"
+    },
+    "abort": {
+      "already_configured": "El dispositivo ya está configurado",
+      "cannot_connect": "No se puede conectar al dispositivo descubierto",
+      "unknown": "Error inesperado durante el descubrimiento",
+      "unique_id_mismatch": "El dispositivo en esta dirección no coincide con el dispositivo Solplanet configurado",
+      "reconfigure_successful": "Configuración actualizada correctamente"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurar Solplanet",
+        "description": "Configura el sondeo de telemetría en vivo (10-3600 segundos). Los metadatos y la configuración del dispositivo se actualizan cada hora.",
+        "data": {
+          "interval": "Intervalo de actualización de datos en vivo (segundos)"
+        },
+        "data_description": {
+          "interval": "Segundos entre actualizaciones de telemetría en vivo."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "absolute_power_target_required": {
+      "message": "Se requiere una potencia objetivo cuando se usa un límite absoluto de potencia."
+    },
+    "battery_coordinator_not_found": {
+      "message": "No se encontró un coordinador de batería para: {identifiers}"
+    },
+    "battery_operation_failed": {
+      "message": "La operación de batería falló: {error}"
+    },
+    "battery_operation_unsupported_v1": {
+      "message": "Las operaciones de batería no se admiten con el protocolo V1."
+    },
+    "communication_error": {
+      "message": "La comunicación con el inversor falló: {error}"
+    },
+    "dongle_operation_unsupported_v1": {
+      "message": "Las operaciones del dongle no se admiten con el protocolo V1."
+    },
+    "invalid_schedule": {
+      "message": "El horario no es válido: {error}"
+    },
+    "inverter_power_failed": {
+      "message": "Error al cambiar el estado de potencia del inversor: {error}"
+    },
+    "lost_current_exceeds_output_current": {
+      "message": "La corriente máxima tras la pérdida de comunicación no puede superar la corriente máxima de salida."
+    },
+    "lost_power_exceeds_rated_power": {
+      "message": "La potencia máxima tras la pérdida de comunicación no puede superar la potencia nominal del inversor ({max_rate} W)."
+    },
+    "meter_coordinator_not_found": {
+      "message": "No se encontró un coordinador de medidor para: {identifiers}"
+    },
+    "meter_power_limit_unsupported_v1": {
+      "message": "El control del límite de potencia del medidor no se admite con el protocolo V1."
+    },
+    "meter_power_limit_unavailable": {
+      "message": "Este firmware del dongle rechazó la acción estándar de límite de potencia del medidor con HTTP 404. Ejecute la acción separada 'Configurar control de límite de potencia (compatibilidad 404)'."
+    },
+    "modbus_unsupported_v1": {
+      "message": "Las operaciones Modbus no se admiten con el protocolo V1."
+    },
+    "no_valid_battery_targets": {
+      "message": "No se seleccionaron entidades o dispositivos de batería Solplanet válidos."
+    },
+    "no_valid_meter_targets": {
+      "message": "No se seleccionaron entidades o dispositivos de medidor Solplanet válidos."
+    },
+    "percentage_power_target_required": {
+      "message": "Se requiere un porcentaje objetivo cuando se usa un límite de potencia porcentual."
+    },
+    "protocol_detection_failed": {
+      "message": "No se puede detectar un protocolo Solplanet compatible: {error}"
+    },
+    "reboot_dongle_failed": {
+      "message": "Error al reiniciar el dongle: {error}"
+    },
+    "schedule_slot_limit": {
+      "message": "Un horario no puede contener más de 6 franjas por día."
+    },
+    "set_meter_power_limit_failed": {
+      "message": "Error al establecer el límite de potencia del medidor: {error}"
+    },
+    "sync_time_failed": {
+      "message": "Error al sincronizar la hora del dongle: {error}"
+    },
+    "target_exceeds_rated_power": {
+      "message": "La potencia objetivo no puede superar la potencia nominal del inversor ({max_rate} W)."
+    },
+    "unexpected_meter_response": {
+      "message": "El dongle devolvió una respuesta inesperada de límite de potencia del medidor: {response}"
+    },
+    "update_failed": {
+      "message": "Error al obtener datos de Solplanet {source}: {error}"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "schedule_configured": { "name": "Programación configurada" },
+      "grid_status": { "name": "Estado de la red" }
+    },
+    "button": {
+      "sync_time": { "name": "Sincronizar hora" },
+      "reboot": { "name": "Reiniciar" }
+    },
+    "number": {
+      "soc_max": { "name": "SOC máximo" },
+      "soc_min": { "name": "SOC mínimo" },
+      "schedule_input_power": { "name": "Potencia de entrada del horario" },
+      "schedule_output_power": { "name": "Potencia de salida del horario" },
+      "led_brightness": { "name": "Brillo del LED" }
+    },
+    "select": {
+      "work_mode": { "name": "Modo de trabajo" },
+      "led_color": { "name": "Color del LED" }
+    },
+    "sensor": {
+      "inverter_status": { "name": "Estado del inversor" },
+      "error_code": { "name": "Código de error" },
+      "frequency": { "name": "Frecuencia" },
+      "power": { "name": "Potencia" },
+      "apparent_power": { "name": "Potencia aparente" },
+      "reactive_power": { "name": "Potencia reactiva" },
+      "power_factor": { "name": "Factor de potencia" },
+      "energy_produced_total": { "name": "Energía producida total" },
+      "energy_produced_today": { "name": "Energía producida hoy" },
+      "temperature": { "name": "Temperatura" },
+      "total_working_hours": { "name": "Horas totales de funcionamiento" },
+      "ac_phase_power": { "name": "Potencia fase {phase} CA" },
+      "ac_phase_reactive_power": { "name": "Potencia reactiva fase {phase} CA" },
+      "ac_phase_voltage": { "name": "Voltaje fase {phase} CA" },
+      "ac_phase_current": { "name": "Corriente fase {phase} CA" },
+      "mppt_voltage": { "name": "Voltaje MPPT {mppt}" },
+      "mppt_current": { "name": "Corriente MPPT {mppt}" },
+      "mppt_power": { "name": "Potencia MPPT {mppt}" },
+      "meter_power": { "name": "Potencia del medidor" },
+      "line_neutral_voltage": { "name": "Voltaje fase-neutro" },
+      "line_neutral_current": { "name": "Corriente fase-neutro" },
+      "line_neutral_active_power": { "name": "Potencia activa fase-neutro" },
+      "line_neutral_power_factor": { "name": "Factor de potencia fase-neutro" },
+      "total_apparent_power": { "name": "Potencia aparente total" },
+      "total_reactive_power": { "name": "Potencia reactiva total" },
+      "grid_supplied_today": { "name": "E-red suministrada" },
+      "grid_feed_in_today": { "name": "E-red vertida" },
+      "total_grid_supplied": { "name": "Total suministrado de red" },
+      "total_grid_feed_in": { "name": "Total vertido a red" },
+      "power_limit_control": { "name": "Control de límite de potencia" },
+      "power_limit_type": { "name": "Tipo de límite de potencia" },
+      "power_limit_phase_mode": { "name": "Modo de fase del límite de potencia" },
+      "export_power_limit_setpoint": { "name": "Consigna del límite de exportación" },
+      "export_power_limit_setpoint_percentage": { "name": "Porcentaje de la consigna del límite de exportación" },
+      "power_limit_setpoint_offset": { "name": "Desplazamiento de la consigna del límite de potencia" },
+      "communication_loss_timeout": { "name": "Tiempo de espera por pérdida de comunicación" },
+      "communication_loss_power_limit": { "name": "Límite de potencia por pérdida de comunicación" },
+      "grid_power": { "name": "Potencia de red" },
+      "grid_energy_in_total": { "name": "Energía de red entrante total" },
+      "grid_energy_out_total": { "name": "Energía de red saliente total" },
+      "grid_energy_in_today": { "name": "Energía de red entrante hoy" },
+      "grid_energy_out_today": { "name": "Energía de red saliente hoy" },
+      "network_mode": { "name": "Modo de red" },
+      "wifi_ssid": { "name": "SSID WiFi" },
+      "wifi_signal_strength": { "name": "Intensidad de la señal WiFi" },
+      "ip_address": { "name": "Dirección IP" },
+      "gateway": { "name": "Puerta de enlace" },
+      "netmask": { "name": "Máscara de red" },
+      "warnings": { "name": "Advertencias" },
+      "communication_status": { "name": "Estado de comunicación" },
+      "battery_status": { "name": "Estado de la batería" },
+      "battery_errors": { "name": "Errores de la batería" },
+      "battery_warnings": { "name": "Advertencias de la batería" },
+      "pv_power": { "name": "Potencia FV" },
+      "pv_energy_today": { "name": "Energía FV hoy" },
+      "pv_energy_total": { "name": "Energía FV total" },
+      "battery_voltage": { "name": "Voltaje de la batería" },
+      "battery_current": { "name": "Corriente de la batería" },
+      "battery_power": { "name": "Potencia de la batería" },
+      "battery_temperature": { "name": "Temperatura de la batería" },
+      "battery_state_of_charge": { "name": "Estado de carga de la batería" },
+      "battery_state_of_health": { "name": "Estado de salud de la batería" },
+      "charging_current_limit": { "name": "Límite de corriente de carga" },
+      "discharging_current_limit": { "name": "Límite de corriente de descarga" },
+      "battery_energy_charging": { "name": "Energía de la batería para cargar" },
+      "battery_energy_discharging": { "name": "Energía de la batería para descargar" },
+      "ac_energy_charging": { "name": "Energía CA para cargar" },
+      "ac_energy_discharging": { "name": "Energía CA para descargar" },
+      "eps_voltage": { "name": "Voltaje EPS" },
+      "eps_current": { "name": "Corriente EPS" },
+      "eps_frequency": { "name": "Frecuencia EPS" },
+      "eps_power": { "name": "Potencia EPS" },
+      "eps_reactive_power": { "name": "Potencia reactiva EPS" },
+      "eps_energy_today": { "name": "Energía EPS hoy" },
+      "eps_energy_total": { "name": "Energía EPS total" },
+      "eps_phase_voltage": { "name": "Voltaje fase {phase} EPS" },
+      "eps_phase_current": { "name": "Corriente fase {phase} EPS" },
+      "eps_phase_power": { "name": "Potencia fase {phase} EPS" },
+      "eps_phase_reactive_power": { "name": "Potencia reactiva fase {phase} EPS" }
+    },
+    "switch": {
+      "inverter_power": { "name": "Potencia" },
+      "battery_power": { "name": "Potencia" },
+      "battery_sleep": { "name": "Suspensión" }
+    }
+  }
+}
