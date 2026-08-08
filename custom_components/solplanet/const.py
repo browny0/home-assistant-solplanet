@@ -340,12 +340,12 @@ BATTERY_MODELS_WITH_LED: frozenset[tuple[int, int]] = frozenset(
     }
 )
 
-# from (assets/meter.json.
+# From assets/meter.json.
 # corresponds to `equipModel` field in the V2 meter app_info response.
 METER_MODEL_NAMES: dict[int, str] = {
-    0: "EASTRON SDM630MCT v2",
+    0: "EASTRON SDM630MCT V2",
     1: "EASTRON SDM630-Modbus V2",
-    2: "EASTRON SDM630-Modbus V1",
+    2: "EASTRON SDM230-Modbus V1",
     3: "EASTRON SDM 220",
     4: "EASTRON SDM120CT(40mA)",
     6: "EASTRON SEM3-M-2L-CT1",
