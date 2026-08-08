@@ -723,6 +723,9 @@ def create_meter_entities_description(
     if isinstance(meter_entry, dict) and "app_info" in meter_entry:
         return []
 
+    if isinstance(meter_entry, dict) and meter_entry.get("is_submeter"):
+        return _create_submeter_entities_description(isn)
+
     sensors: list[SolplanetSensorEntityDescription] = [
         SolplanetSensorEntityDescription(
             key=f"{isn}_pac",
@@ -733,6 +736,7 @@ def create_meter_entities_description(
             native_unit_of_measurement=UnitOfPower.WATT,
             device_class=SensorDeviceClass.POWER,
             state_class=SensorStateClass.MEASUREMENT,
+            unique_id_suffix="pac",
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_iet",
@@ -789,6 +793,73 @@ def create_meter_entities_description(
     )
 
     return sensors
+
+
+def _create_submeter_entities_description(
+    isn: str,
+) -> list[SolplanetSensorEntityDescription]:
+    """Create neutral import/export sensors for a legacy secondary meter."""
+    return [
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_submeter_power",
+            translation_key="submeter_power",
+            unique_id_suffix="submeter_power",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["pac"],
+            native_unit_of_measurement=UnitOfPower.WATT,
+            device_class=SensorDeviceClass.POWER,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_submeter_imported_today",
+            translation_key="submeter_energy_imported_today",
+            unique_id_suffix="submeter_energy_imported_today",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["itd"],
+            data_field_value_multiply=0.01,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+        ),
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_submeter_imported_total",
+            translation_key="submeter_energy_imported_total",
+            unique_id_suffix="submeter_energy_imported_total",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["iet"],
+            data_field_value_multiply=0.1,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+            state_class=SensorStateClass.TOTAL,
+        ),
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_submeter_exported_today",
+            translation_key="submeter_energy_exported_today",
+            unique_id_suffix="submeter_energy_exported_today",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["otd"],
+            data_field_value_multiply=0.01,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+        ),
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_submeter_exported_total",
+            translation_key="submeter_energy_exported_total",
+            unique_id_suffix="submeter_energy_exported_total",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=["oet"],
+            data_field_value_multiply=0.1,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            device_class=SensorDeviceClass.ENERGY,
+            state_class=SensorStateClass.TOTAL,
+        ),
+    ]
 
 
 def create_dongle_entities_description(

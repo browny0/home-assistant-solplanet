@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from aiohttp import ClientResponseError
 import pytest
@@ -12,6 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.solplanet.client import GetMeterDataResponse
 from custom_components.solplanet.const import (
     BATTERY_IDENTIFIER,
     CONF_INTERVAL,
@@ -29,6 +30,7 @@ from custom_components.solplanet.coordinator import (
     SolplanetMetadataUpdateCoordinator,
     SolplanetMeterUpdateCoordinator,
     SolplanetRuntimeData,
+    _is_enabled,
     _legacy_meter_payload_looks_valid,
 )
 from custom_components.solplanet.modbus import DataType
@@ -583,6 +585,21 @@ def test_legacy_meter_payload_validation(payload: object, expected: bool) -> Non
     assert _legacy_meter_payload_looks_valid(payload) is expected
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, True),
+        ("1", True),
+        ("0", False),
+        (None, False),
+        ("invalid", False),
+    ],
+)
+def test_meter_enabled_flag_validation(value: object, expected: bool) -> None:
+    """Meter enable flags accept integers and numeric strings."""
+    assert _is_enabled(value) is expected
+
+
 @pytest.mark.asyncio
 async def test_metadata_refresh_dispatches_new_devices() -> None:
     """Metadata refresh primes live data and dispatches newly discovered IDs."""
@@ -603,6 +620,35 @@ async def test_metadata_refresh_dispatches_new_devices() -> None:
     live.async_refresh.assert_awaited_once()
     assert dispatch.call_count == 2
     assert coordinator._new_device_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_metadata_refresh_primes_each_available_live_coordinator() -> None:
+    """Every newly discovered device refreshes its corresponding coordinator."""
+    hass = HomeAssistant("/tmp")
+    runtime = SolplanetRuntimeData(_api())
+    coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
+    live_coordinators = {
+        INVERTER_IDENTIFIER: SimpleNamespace(async_refresh=AsyncMock()),
+        BATTERY_IDENTIFIER: SimpleNamespace(async_refresh=AsyncMock()),
+        METER_IDENTIFIER: SimpleNamespace(async_refresh=AsyncMock()),
+        DONGLE_IDENTIFIER: SimpleNamespace(async_refresh=AsyncMock()),
+    }
+    runtime.inverter_coordinator = live_coordinators[INVERTER_IDENTIFIER]
+    runtime.battery_coordinator = live_coordinators[BATTERY_IDENTIFIER]
+    runtime.meter_coordinator = live_coordinators[METER_IDENTIFIER]
+    runtime.dongle_coordinator = live_coordinators[DONGLE_IDENTIFIER]
+    coordinator._new_device_ids = {
+        device_type: {f"{device_type}-1"} for device_type in live_coordinators
+    }
+    coordinator._async_update_runtime_data = AsyncMock()
+
+    with patch("custom_components.solplanet.coordinator.async_dispatcher_send") as dispatch:
+        assert await coordinator._async_update_data() is runtime.data
+
+    for live_coordinator in live_coordinators.values():
+        live_coordinator.async_refresh.assert_awaited_once()
+    assert dispatch.call_count == len(live_coordinators)
 
 
 @pytest.mark.asyncio
@@ -886,6 +932,102 @@ async def test_app_meter_configuration_failure_is_nonfatal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_indexed_meter_discovery_uses_three_phase_get_payloads() -> None:
+    """V2 fallback discovery creates main and sub-meter entries from indexed GETs."""
+    hass = HomeAssistant("/tmp")
+    api = _api()
+    runtime = SolplanetRuntimeData(api)
+    coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
+    info = SimpleNamespace(
+        sn=None,
+        manufactory=None,
+        name=None,
+        mod=6,
+        sec_enb=1,
+        sec_mod=7,
+    )
+    api.get_meter_info.return_value = info
+    api.client.post.side_effect = RuntimeError("404 from getting.cgi")
+    main = GetMeterDataResponse(
+        tim="2026-07-23 23:14:25",
+        pac=0,
+        itd=9,
+        otd=9,
+        iet=6,
+        oet=136,
+        mod=6,
+        meter_general={"prc": -707, "sac": 804, "avg_v": 2402},
+        prc_phs=[-443, -146, -120],
+    )
+    sub = GetMeterDataResponse(
+        tim="2026-07-23 23:15:06",
+        pac=0,
+        itd=3864,
+        otd=0,
+        iet=448,
+        oet=0,
+        mod=7,
+        meter_general={"prc": 156, "sac": 158, "avg_v": 2409},
+        prc_phs=[103, 24, 28],
+    )
+    api.get_meter_data.side_effect = [main, sub]
+
+    await coordinator._async_update_meter_metadata(
+        [SimpleNamespace(isn="INVERTER-SERIAL")]
+    )
+
+    assert runtime.data[METER_IDENTIFIER] == {
+        "INVERTER-SERIAL": {
+            "info": info,
+            "data": main,
+            "model_name": "EASTRON SEM3-M-2L-CT1 (Grid)",
+        },
+        "INVERTER-SERIAL_sub1": {
+            "info": info,
+            "data": sub,
+            "model_name": "EASTRON SEM3-M-2L-CT2",
+            "submeter_index": 1,
+            "is_submeter": True,
+        },
+    }
+    api.client.post.assert_awaited_once_with(
+        "getting.cgi",
+        {"cmd": "get_app_dev_info_req", "payload": {"type": [4]}},
+    )
+    assert api.get_meter_data.await_args_list == [
+        call(submeter=None),
+        call(submeter=1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_indexed_meter_discovery_ignores_failed_submeter_probe() -> None:
+    """A failed secondary probe does not discard the available main meter."""
+    hass = HomeAssistant("/tmp")
+    api = _api()
+    runtime = SolplanetRuntimeData(api)
+    coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
+    info = SimpleNamespace(sn="meter", mod=6, sec_enb="1", sec_mod=7)
+    main = GetMeterDataResponse(tim="now", pac=1)
+    api.get_meter_info.return_value = info
+    api.get_meter_data.side_effect = [main, RuntimeError("offline")]
+
+    await coordinator._async_update_legacy_meter_metadata([], {})
+
+    assert runtime.data[METER_IDENTIFIER] == {
+        "meter": {
+            "info": info,
+            "data": main,
+            "model_name": "EASTRON SEM3-M-2L-CT1 (Grid)",
+        }
+    }
+    assert api.get_meter_data.await_args_list == [
+        call(submeter=None),
+        call(submeter=1),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_legacy_meter_metadata_paths() -> None:
     """Legacy meter discovery handles new, existing, invalid, and missing meters."""
     hass = HomeAssistant("/tmp")
@@ -928,6 +1070,27 @@ async def test_legacy_meter_metadata_paths() -> None:
     api.get_meter_data.return_value = SimpleNamespace(tim="", pac=0, itd=0, otd=0, iet=0, oet=0)
     await coordinator._async_update_legacy_meter_metadata([inverter], {})
     assert runtime.data[METER_IDENTIFIER] is before
+
+
+@pytest.mark.asyncio
+async def test_legacy_meter_metadata_reuses_existing_entry_without_probe() -> None:
+    """Existing legacy meters preserve telemetry until their live coordinator polls."""
+    hass = HomeAssistant("/tmp")
+    api = _api(version="v1")
+    runtime = SolplanetRuntimeData(api)
+    coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
+    info = SimpleNamespace(sn="meter")
+    existing_data = SimpleNamespace(tim="previous")
+    api.get_meter_info.return_value = info
+
+    await coordinator._async_update_legacy_meter_metadata(
+        [], {"meter": {"data": existing_data}}
+    )
+
+    assert runtime.data[METER_IDENTIFIER] == {
+        "meter": {"info": info, "data": existing_data}
+    }
+    api.get_meter_data.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -989,7 +1152,29 @@ async def test_meter_live_polling_paths() -> None:
     with pytest.raises(RuntimeError, match="Unexpected get_meter_data"):
         await coordinator._async_update_runtime_data()
 
+    runtime.data[METER_IDENTIFIER] = {
+        "main": {"data": None},
+        "sub": {"submeter_index": 1, "data": None},
+    }
+    main = GetMeterDataResponse(tim="now", meter_general={"prc": -707})
+    sub = GetMeterDataResponse(tim="now", meter_general={"prc": 156})
+    api.get_meter_data.side_effect = [main, sub]
+    await coordinator._async_update_runtime_data()
+    assert runtime.data[METER_IDENTIFIER]["main"]["data"] is main
+    assert runtime.data[METER_IDENTIFIER]["sub"]["data"] is sub
+    assert api.get_meter_data.await_args_list[-2:] == [
+        call(submeter=None),
+        call(submeter=1),
+    ]
+    assert coordinator.failed_device_ids == set()
+
+    api.get_meter_data.side_effect = [RuntimeError("main offline"), sub]
+    await coordinator._async_update_runtime_data()
+    assert coordinator.failed_device_ids == {"main"}
+    assert runtime.data[METER_IDENTIFIER]["sub"]["data"] is sub
+
     runtime.data[METER_IDENTIFIER] = {}
+    api.get_meter_data.side_effect = None
     await coordinator._async_update_runtime_data()
 
     runtime.data[METER_IDENTIFIER] = {"legacy": {"data": None}}

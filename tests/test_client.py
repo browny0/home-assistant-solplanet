@@ -459,6 +459,49 @@ async def test_api_data_getters(
     assert not hasattr(result, "new")
 
 
+async def test_v2_indexed_meter_data_preserves_three_phase_payload() -> None:
+    """Indexed V2 reads retain the reporter's nested three-phase telemetry."""
+    payload = {
+        "flg": 0,
+        "tim": "2026-07-23 23:15:06",
+        "pac": 0,
+        "itd": 3864,
+        "otd": 0,
+        "iet": 448,
+        "oet": 0,
+        "mod": 7,
+        "meter_general": {
+            "prc": 156,
+            "sac": 158,
+            "phs": 90,
+            "pf": -1,
+            "avg_v": 2409,
+            "avg_i": 2,
+            "iac": 6,
+            "fac": 4997,
+            "iqet": 0,
+            "oqet": 0,
+        },
+        "vac_phs": [2398, 2409, 2421],
+        "iac_phs": [4, 1, 1],
+        "vac_line": [4132, 4187, 4199],
+        "pac_phs": [0, 0, 0],
+        "prc_phs": [103, 24, 28],
+        "sac_phs": [104, 25, 29],
+        "pf_phs": [-1, -1, 0],
+        "ang_phs": [0, 241, 121],
+    }
+    client = MagicMock()
+    client.get = AsyncMock(return_value=payload)
+
+    result = await SolplanetApiV2(client).get_meter_data(1)
+
+    client.get.assert_awaited_once_with("getdevdata.cgi?device=3&submeter=1")
+    assert result.pac == 0
+    assert result.prc_phs == [103, 24, 28]
+    assert result.meter_general == payload["meter_general"]
+
+
 @pytest.mark.parametrize(
     ("api_class", "endpoint"),
     [(SolplanetApiV1, "invinfo.cgi"), (SolplanetApiV2, "getdev.cgi?device=2")],

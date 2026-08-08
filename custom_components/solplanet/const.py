@@ -348,7 +348,10 @@ METER_MODEL_NAMES: dict[int, str] = {
     2: "EASTRON SDM230-Modbus V1",
     3: "EASTRON SDM 220",
     4: "EASTRON SDM120CT(40mA)",
-    6: "EASTRON SEM3-M-2L-CT1",
+    # Confirmed by the three-phase ASW10kH-T3 response in issue #8.
+    # https://github.com/calvinbui/home-assistant-solplanet/issues/8#issuecomment-5058983281
+    6: "EASTRON SEM3-M-2L-CT1 (Grid)",
+    7: "EASTRON SEM3-M-2L-CT2",
     8: "EASTRON SEM1-M-2L-Grid",
     9: "EASTRON SEM1-M-2L-PV",
     11: "SolplanetCT",

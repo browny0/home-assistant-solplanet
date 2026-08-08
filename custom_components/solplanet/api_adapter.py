@@ -104,7 +104,7 @@ class SolplanetApiAdapter:
     def _v2_api(self) -> SolplanetApiV2:
         """Return the V2 API or reject operations unsupported by V1."""
         if self._version != "v2":
-            raise NotImplementedError("Battery operations are not supported in V1 protocol")
+            raise NotImplementedError("This operation is not supported in V1 protocol")
         return cast(SolplanetApiV2, self._api)
 
     # ========================================================================
@@ -130,12 +130,16 @@ class SolplanetApiAdapter:
         """
         return await self._api.get_inverter_info()
 
-    async def get_meter_data(self) -> GetMeterDataResponse:
+    async def get_meter_data(self, submeter: int | None = None) -> GetMeterDataResponse:
         """Get meter data.
+
+        Indexed sub-meter reads are available only with the V2 protocol.
 
         Returns:
             GetMeterDataResponse: Meter data
         """
+        if submeter is not None:
+            return await self._v2_api().get_meter_data(submeter)
         return await self._api.get_meter_data()
 
     async def get_meter_info(self) -> GetMeterInfoResponse:

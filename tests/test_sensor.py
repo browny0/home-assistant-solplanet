@@ -6,8 +6,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from custom_components.solplanet import sensor
-from custom_components.solplanet.client import GetInverterDataResponse
+from custom_components.solplanet.client import GetInverterDataResponse, GetMeterDataResponse
 from custom_components.solplanet.const import (
     BATTERY_IDENTIFIER,
     DONGLE_IDENTIFIER,
@@ -117,6 +119,35 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
         coordinator,
     )._attr_native_value == 5
     assert "export_power_limit_setpoint" not in legacy_by_suffix
+
+    indexed = GetMeterDataResponse(
+        pac=0,
+        iet=448,
+        meter_general={"prc": 156},
+    )
+    coordinator.data[METER_IDENTIFIER]["indexed"] = {
+        "data": indexed,
+        "info": {},
+        "is_submeter": True,
+        "submeter_index": 1,
+    }
+    indexed_descriptions = sensor.create_meter_entities_description(
+        coordinator,
+        "indexed",
+    )
+    power = next(
+        item for item in indexed_descriptions if item.unique_id_suffix == "submeter_power"
+    )
+    assert power.data_field_path == ["pac"]
+    assert sensor.SolplanetSensor(power, "indexed", coordinator)._attr_native_value == 0
+    imported = next(
+        item
+        for item in indexed_descriptions
+        if item.unique_id_suffix == "submeter_energy_imported_total"
+    )
+    assert sensor.SolplanetSensor(
+        imported, "indexed", coordinator
+    )._attr_native_value == pytest.approx(44.8)
 
 
 def test_dongle_and_battery_catalog_mappers() -> None:

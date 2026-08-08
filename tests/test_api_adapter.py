@@ -114,6 +114,19 @@ async def test_common_operations_delegate(
     mock.assert_awaited_once_with(*args)
 
 
+async def test_indexed_meter_reads_delegate_only_to_v2() -> None:
+    """The adapter routes indexed meter reads through the V2 API."""
+    adapter, api = _adapter("v2")
+    api.get_meter_data = AsyncMock(return_value={"power": 156})
+
+    assert await adapter.get_meter_data(1) == {"power": 156}
+    api.get_meter_data.assert_awaited_once_with(1)
+
+    adapter, _api_v1 = _adapter("v1")
+    with pytest.raises(NotImplementedError, match="not supported in V1"):
+        await adapter.get_meter_data(1)
+
+
 @pytest.mark.parametrize(
     ("method", "args"),
     [

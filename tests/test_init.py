@@ -149,6 +149,38 @@ def test_register_devices_covers_all_inventory_types() -> None:
     assert calls[6]["name"] == "Energy meter"
 
 
+def test_register_devices_labels_indexed_sub_meter() -> None:
+    """Indexed telemetry creates distinct main and sub-meter registry devices."""
+    meter_info = SimpleNamespace(sn=None, manufactory="Eastron", name="SDM630")
+    runtime = SimpleNamespace(
+        data={
+            DONGLE_IDENTIFIER: {},
+            INVERTER_IDENTIFIER: {},
+            BATTERY_IDENTIFIER: {},
+            METER_IDENTIFIER: {
+                "INV": {"info": meter_info},
+                "INV_sub1": {
+                    "info": meter_info,
+                    "model_name": "EASTRON SEM3-M-2L-CT2",
+                    "is_submeter": True,
+                    "submeter_index": 1,
+                },
+            },
+        }
+    )
+    entry = SimpleNamespace(data={}, entry_id="entry-id", runtime_data=runtime)
+    registry = _registry()
+
+    integration._register_devices(registry, entry)
+
+    calls = [call.kwargs for call in registry.async_get_or_create.call_args_list]
+    assert [item["name"] for item in calls] == ["Energy meter", "EASTRON SEM3-M-2L-CT2"]
+    assert calls[0]["serial_number"] is None
+    assert calls[1]["serial_number"] == "INV_sub1"
+    assert calls[1]["model"] == "EASTRON SEM3-M-2L-CT2"
+    assert calls[1]["identifiers"] == {(DOMAIN, "meter_INV_sub1")}
+
+
 def test_register_devices_detaches_only_authoritatively_stale_devices() -> None:
     """A complete inventory detaches stale devices without deleting shared entries."""
     inverter_info = SimpleNamespace(

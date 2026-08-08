@@ -217,6 +217,17 @@ def _register_devices(
         )
 
     for meter_id, meter_entry in data[METER_IDENTIFIER].items():
+        if meter_entry.get("is_submeter"):
+            model_name = meter_entry.get("model_name") or ""
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_id}")},
+                name=model_name or "Sub-meter",
+                serial_number=meter_id,
+                manufacturer=MANUFACTURER,
+                model=model_name,
+            )
+            continue
         meter_info = meter_entry.get("info")
         app_info = meter_entry.get("app_info")
 
@@ -239,13 +250,14 @@ def _register_devices(
                 model=model_name or "",
             )
         elif meter_info is not None:
+            model_name = meter_entry.get("model_name") or meter_info.name
             device_registry.async_get_or_create(
                 config_entry_id=entry.entry_id,
                 identifiers={(DOMAIN, f"{METER_IDENTIFIER}_{meter_id or ''}")},
                 name="Energy meter",
                 serial_number=meter_info.sn,
                 manufacturer=meter_info.manufactory,
-                model=meter_info.name,
+                model=model_name,
             )
 
     _remove_stale_devices(device_registry, entry, current_identifiers)

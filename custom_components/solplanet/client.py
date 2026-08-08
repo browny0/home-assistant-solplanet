@@ -618,6 +618,15 @@ class GetMeterDataResponse:
         oet: Total exported energy in 0.1 kWh
         mod: Meter operating mode
         enb: Meter enabled status
+        meter_general: Aggregate meter telemetry used by newer three-phase firmware
+        vac_phs: Raw per-phase voltage readings
+        iac_phs: Raw per-phase current readings
+        vac_line: Raw line-voltage readings
+        pac_phs: Raw per-phase PAC readings
+        prc_phs: Raw per-phase active-power readings
+        sac_phs: Raw per-phase apparent-power readings
+        pf_phs: Raw per-phase power-factor readings
+        ang_phs: Raw per-phase angle readings
 
     """
 
@@ -630,7 +639,15 @@ class GetMeterDataResponse:
     oet: int | None = None
     mod: int | None = None
     enb: int | None = None
-
+    meter_general: dict[str, int | float | None] | None = None
+    vac_phs: list[int] | None = None
+    iac_phs: list[int] | None = None
+    vac_line: list[int] | None = None
+    pac_phs: list[int] | None = None
+    prc_phs: list[int] | None = None
+    sac_phs: list[int] | None = None
+    pf_phs: list[int] | None = None
+    ang_phs: list[int] | None = None
 
 @dataclass
 class GetMeterInfoResponse:
@@ -653,6 +670,8 @@ class GetMeterInfoResponse:
         model: Meter model code
         abs: Absolute value flag
         offset: Offset value
+        sec_enb: Secondary meter enabled status
+        sec_mod: Secondary meter model code
 
     """
 
@@ -672,6 +691,8 @@ class GetMeterInfoResponse:
     model: int | None = None
     abs: int | None = None
     offset: int | None = None
+    sec_enb: int | None = None
+    sec_mod: int | None = None
 
 
 @dataclass
@@ -996,10 +1017,13 @@ class SolplanetApiV2(ModbusApiMixin):
         ]
         return self._create_class_from_dict(GetInverterInfoResponse, response)
 
-    async def get_meter_data(self) -> GetMeterDataResponse:
+    async def get_meter_data(self, submeter: int | None = None) -> GetMeterDataResponse:
         """Get meter data."""
-        _LOGGER.debug("Getting meter data")
-        response = await self.client.get("getdevdata.cgi?device=3")
+        endpoint = "getdevdata.cgi?device=3"
+        if submeter is not None:
+            endpoint += f"&submeter={submeter}"
+        _LOGGER.debug("Getting meter data (submeter=%s)", submeter)
+        response = await self.client.get(endpoint)
         return self._create_class_from_dict(GetMeterDataResponse, response)
 
     async def get_meter_info(self) -> GetMeterInfoResponse:

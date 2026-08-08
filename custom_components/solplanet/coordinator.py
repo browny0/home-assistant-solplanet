@@ -31,6 +31,7 @@ from .const import (
     DONGLE_IDENTIFIER,
     INVERTER_IDENTIFIER,
     METER_IDENTIFIER,
+    METER_MODEL_NAMES,
 )
 from .modbus import DataType
 from .validation import is_zero_filled_battery_payload
@@ -520,6 +521,18 @@ def _legacy_meter_payload_looks_valid(meter_data: object) -> bool:
     )
 
 
+def _is_enabled(value: object) -> bool:
+    """Return whether a firmware enable flag is set, accepting numeric strings."""
+    if isinstance(value, int):
+        return value == 1
+    if not isinstance(value, str):
+        return False
+    try:
+        return int(value) == 1
+    except ValueError:
+        return False
+
+
 class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
     """Poll device inventory, settings, and other slowly changing data."""
 
@@ -788,7 +801,7 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
         inverter_info: list[Any],
         previous: dict[str, dict[str, Any]],
     ) -> None:
-        """Refresh V1 or fallback V2 meter metadata."""
+        """Refresh V1 or fallback V2 meter metadata, including a secondary meter."""
         fallback_id = next((info.isn for info in inverter_info if info.isn), None)
         try:
             info = await self.api.get_meter_info()
@@ -800,25 +813,63 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
         if meter_id is None:
             return
 
-        previous_entry = previous.get(meter_id)
+        main_entry = await self._build_legacy_meter_entry(
+            meter_id, info, previous.get(meter_id), submeter_index=None
+        )
+        if main_entry is None:
+            return
+
+        updated: dict[str, dict[str, Any]] = {meter_id: main_entry}
+        if self.api.version == "v2" and _is_enabled(getattr(info, "sec_enb", None)):
+            sub_id = f"{meter_id}_sub1"
+            sub_entry = await self._build_legacy_meter_entry(
+                sub_id, info, previous.get(sub_id), submeter_index=1
+            )
+            if sub_entry is not None:
+                sub_entry["is_submeter"] = True
+                updated[sub_id] = sub_entry
+
+        self.runtime.data[METER_IDENTIFIER] = updated
+
+    async def _build_legacy_meter_entry(
+        self,
+        meter_id: str,
+        info: Any,
+        previous_entry: dict[str, Any] | None,
+        *,
+        submeter_index: int | None,
+    ) -> dict[str, Any] | None:
+        """Build one legacy meter entry, probing live data on first discovery."""
         entry = dict(previous_entry or {})
         entry["info"] = info
+        model_code = (
+            getattr(info, "sec_mod", None)
+            if submeter_index is not None
+            else getattr(info, "mod", None)
+        )
+        if isinstance(model_code, int):
+            entry["model_name"] = METER_MODEL_NAMES.get(model_code, "")
+        if submeter_index is not None:
+            entry["submeter_index"] = submeter_index
 
-        # Probe live data only when discovering a legacy meter. Subsequent live
-        # reads belong exclusively to SolplanetMeterUpdateCoordinator.
         if previous_entry is None:
             try:
-                data = await self.api.get_meter_data()
+                data = await self.api.get_meter_data(submeter=submeter_index)
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Failed probing legacy meter data: %s", err, exc_info=True)
-                return
+                _LOGGER.debug(
+                    "Failed probing legacy meter data for %s: %s",
+                    meter_id,
+                    err,
+                    exc_info=True,
+                )
+                return None
             if self.api.version == "v2" and not _legacy_meter_payload_looks_valid(data):
-                return
+                return None
             entry["data"] = data
         else:
             entry.setdefault("data", None)
 
-        self.runtime.data[METER_IDENTIFIER] = {meter_id: entry}
+        return entry
 
 
 class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
@@ -976,10 +1027,25 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
         if not entries:
             return
 
-        data = await self.api.get_meter_data()
-        if self.api.version == "v2" and not _legacy_meter_payload_looks_valid(data):
-            raise RuntimeError("legacy meter returned an empty or zero-filled payload")
-        next(iter(entries.values()))["data"] = data
+        successful_updates = 0
+        failed_device_ids: set[str] = set()
+        last_error: Exception | None = None
+        for meter_id, entry in entries.items():
+            try:
+                data = await self.api.get_meter_data(submeter=entry.get("submeter_index"))
+                if self.api.version == "v2" and not _legacy_meter_payload_looks_valid(data):
+                    raise RuntimeError("legacy meter returned an empty or zero-filled payload")
+            except Exception as err:  # noqa: BLE001
+                failed_device_ids.add(meter_id)
+                last_error = err
+                _LOGGER.debug("Failed fetching meter data for %s: %s", meter_id, err, exc_info=True)
+            else:
+                entry["data"] = data
+                successful_updates += 1
+
+        self.failed_device_ids = failed_device_ids
+        if successful_updates == 0:
+            raise last_error or RuntimeError("No meter data returned")
 
 
 class SolplanetDongleUpdateCoordinator(SolplanetDataUpdateCoordinator):

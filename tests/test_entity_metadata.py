@@ -31,6 +31,12 @@ def _catalog() -> dict[str, list]:
         "data": SimpleNamespace(pac=1, iet=2, oet=3, itd=4, otd=5),
         "info": {},
     }
+    legacy_submeter = "legacy-submeter"
+    coordinator.data[METER_IDENTIFIER][legacy_submeter] = {
+        "data": SimpleNamespace(pac=1, iet=2, oet=3, itd=4, otd=5),
+        "info": {},
+        "is_submeter": True,
+    }
     return {
         "binary_sensor": [
             *binary_sensor.create_battery_binary_sensors(coordinator, "bat-1"),
@@ -43,6 +49,7 @@ def _catalog() -> dict[str, list]:
             *sensor.create_inverter_entities_description(coordinator, "inv-1"),
             *sensor.create_meter_entities_description(coordinator, "meter-1"),
             *sensor.create_meter_entities_description(coordinator, legacy_meter),
+            *sensor.create_meter_entities_description(coordinator, legacy_submeter),
             *sensor.create_dongle_entities_description(coordinator, "dongle-1"),
             *sensor.create_battery_entities_description(coordinator, "bat-1"),
         ],
