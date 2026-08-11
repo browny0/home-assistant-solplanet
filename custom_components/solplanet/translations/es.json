@@ -230,7 +230,8 @@
       "eps_phase_voltage": { "name": "Voltaje fase {phase} EPS" },
       "eps_phase_current": { "name": "Corriente fase {phase} EPS" },
       "eps_phase_power": { "name": "Potencia fase {phase} EPS" },
-      "eps_phase_reactive_power": { "name": "Potencia reactiva fase {phase} EPS" }
+      "eps_phase_reactive_power": { "name": "Potencia reactiva fase {phase} EPS" },
+      "import_current_limit": { "name": "Límite de corriente de importación"}
     },
     "switch": {
       "inverter_power": { "name": "Potencia" },
