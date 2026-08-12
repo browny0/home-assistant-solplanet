@@ -1,23 +1,45 @@
 # Energy Dashboard
 
-Home Assistant's Energy dashboard shows how much energy your solar system produces, how much you import or export, and how much enters or leaves your battery.
+Home Assistant's Energy dashboard shows how much energy your solar system produces, how much you import or export, and how much enters or leaves your battery (if you have one).
 
-The Energy dashboard uses energy values measured in kilowatt-hours (kWh). Do not select live power entities measured in watts (W) for the energy fields.
+The Energy dashboard has two main views that need different sensors:
+
+- **Electricity** (`/energy/electricity`) — the historical charts. It needs energy values measured in kilowatt-hours (kWh). This view works without live-power entities.
+- **Now** (`/energy/now`) — the live flow diagram. It needs the same energy sources **plus** a live power entity (W) for each source. If no power entity is configured, the view is empty even when the historical charts work.
+
+Do not select live power entities (W) for the energy (kWh) fields. Power entities belong in the separate **Power measurement** field on each source.
+
+Single-phase and three-phase systems use the same total-power entities. Per-phase entities (for example, **AC phase 1 power**) are diagnostic only and should not be used in the Energy dashboard.
 
 ## Recommended Entities
 
-Choose the entities that match your system. Their entity IDs may differ, so select them by their displayed names.
+Choose the entities that match your system. Their entity IDs may differ, so select them by their displayed names. Skip any section that does not apply to your installation.
+
+### Energy fields (kWh)
 
 | Energy dashboard field | V2 entity | V1 entity |
 | --- | --- | --- |
 | Grid consumption | **Total grid supplied** | **Grid energy in total** |
 | Return to grid | **Total grid feed-in** | **Grid energy out total** |
-| Battery energy incoming | **Battery energy for charging** | **Battery energy for charging** |
-| Battery energy outgoing | **Battery energy for discharging** | **Battery energy for discharging** |
+| Battery energy incoming (if you have a battery) | **Battery energy for charging** | **Battery energy for charging** |
+| Battery energy outgoing (if you have a battery) | **Battery energy for discharging** | **Battery energy for discharging** |
 
-For solar production, use **PV energy total** from the battery device on a typical hybrid system. If that entity is unavailable and the inverter reports solar-only production, use **Energy produced total** from the inverter.
+For solar production, use **PV energy total** from the battery device on a typical hybrid system. If you do not have a battery device, or **PV energy total** is unavailable and the inverter reports solar-only production, use **Energy produced total** from the inverter.
 
 Do not add two entities that measure the same solar panels. This would count the production twice.
+
+### Power measurement fields (W) — required for `/energy/now`
+
+| Power measurement field | V2 entity | V1 entity |
+| --- | --- | --- |
+| Grid power | **Meter power** (this integration) or your meter's power entity | **Grid power** (this integration) or your meter's power entity |
+| Solar power (hybrid with battery) | **PV power** (battery device) | **PV power** (battery device) |
+| Solar power (solar-only, no battery) | **Power** (inverter device) | **Power** (inverter device) |
+| Battery power (if you have a battery) | **Battery power** | **Battery power** |
+
+If your meter comes from a different Home Assistant integration, select its power entity in the **Power measurement** field instead. The friendly name will differ (for example, an EASTRON meter appears as **EASTRON SDM230-Modbus V1 Meter power**).
+
+Power entities use the standard Home Assistant convention: grid positive = importing, battery positive = charging, solar positive = producing. Use **Normal** for the **Type of power measurement** toggle unless your meter reports the opposite sign.
 
 ## Add The Grid
 
@@ -25,17 +47,19 @@ Do not add two entities that measure the same solar panels. This would count the
 2. Find **Grid consumption** and add a source.
 3. Set **Energy imported from the grid** to **Total grid supplied**, or **Grid energy in total** on V1.
 4. Set **Energy exported to the grid** to **Total grid feed-in**, or **Grid energy out total** on V1.
-5. Add your import and export prices if you want Home Assistant to estimate costs and returns.
-6. Save the configuration.
+5. Set **Power measurement** to the power entity for your grid meter (**Meter power** on V2, **Grid power** on V1, or the equivalent from your meter integration). This is required for the live `/energy/now` view.
+6. Add your import and export prices if you want Home Assistant to estimate costs and returns.
+7. Save the configuration.
 
 Use the main meter entities. Do not use a discovered sub-meter unless it genuinely measures a separate grid connection and provides its own energy values.
 
 ## Add Solar Production
 
 1. Find **Solar panels** in the Energy configuration.
-2. Add **PV energy total** for a hybrid inverter and battery system.
-3. If **PV energy total** is unavailable, add **PV energy today** or the inverter's **Energy produced total**, whichever represents solar production on your installation.
-4. Save the configuration.
+2. Add **PV energy total** from the battery device on a hybrid system.
+3. If you do not have a battery device, or **PV energy total** is unavailable, add **PV energy today** or the inverter's **Energy produced total**, whichever represents solar production on your installation.
+4. Set **Power measurement** to **PV power** from the battery device on a hybrid system. On a solar-only inverter without a battery device, use **Power** from the inverter device. This is required for the live `/energy/now` view.
+5. Save the configuration.
 
 For a hybrid inverter, total inverter output can include energy discharged from the battery. Using that value as solar production can count stored energy as new solar energy. Compare your chosen entity with the Solplanet app over a full day before relying on it.
 
@@ -43,10 +67,14 @@ If you have a separate solar inverter that is not monitored by this integration,
 
 ## Add The Battery
 
+Skip this section if your installation does not include a battery.
+
 1. Find **Home battery storage** in the Energy configuration.
 2. Set **Energy going into the battery** to **Battery energy for charging**.
 3. Set **Energy coming out of the battery** to **Battery energy for discharging**.
-4. Save the configuration.
+4. Set **Power measurement** to **Battery power**. This is required for the live `/energy/now` view.
+5. Optionally add the battery state-of-charge sensor to enable the SOC badge in the live view.
+6. Save the configuration.
 
 If you have multiple battery devices, check whether each entity reports an independent stack or repeats the total for the whole system. Add independent stack counters, but add only one entity if every battery repeats the same system total.
 
