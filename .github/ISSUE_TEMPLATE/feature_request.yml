@@ -36,6 +36,15 @@ body:
       required: true
 
   - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Version shown in HACS, or the tag/commit you installed
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
     id: inverter_model
     attributes:
       label: Inverter model
