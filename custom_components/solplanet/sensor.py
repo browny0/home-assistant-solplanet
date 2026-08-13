@@ -271,7 +271,7 @@ def _create_power_limit_entities_description(
                 isn,
                 data_type,
                 "export_current_limit",
-                mapper=_power_limit_value("maxOutCurr", when=("ctrlType", 0)),
+                mapper=_power_limit_value("maxOutCurr", when=("ctrlType", 1)),
                 unit=UnitOfElectricCurrent.AMPERE,
                 device_class=SensorDeviceClass.CURRENT,
             ),
