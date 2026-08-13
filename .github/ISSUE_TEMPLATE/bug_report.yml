@@ -42,7 +42,7 @@ body:
     attributes:
       label: Integration version
       description: Version shown in HACS, or the tag/commit you installed
-      placeholder: "0.10.0"
+      placeholder: "1.0.0"
     validations:
       required: true
 
