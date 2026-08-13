@@ -39,7 +39,9 @@ Do not add two entities that measure the same solar panels. This would count the
 
 If your meter comes from a different Home Assistant integration, select its power entity in the **Power measurement** field instead. The friendly name will differ (for example, an EASTRON meter appears as **EASTRON SDM230-Modbus V1 Meter power**).
 
-Power entities use the standard Home Assistant convention: grid positive = importing, battery positive = charging, solar positive = producing. Use **Normal** for the **Type of power measurement** toggle unless your meter reports the opposite sign.
+Power entities follow the Home Assistant Energy dashboard convention: grid positive = importing, battery positive = discharging, solar positive = producing. The **Type of power measurement** dropdown offers **Standard** (entity already follows this convention) and **Inverted** (HA will flip the sign). Use **Standard** if your entity already matches the convention above; switch to **Inverted** if it does not.
+
+If you are unsure which value to pick, force a clear charging or discharging moment and watch **Developer tools > States** while it is happening. The Solplanet `battery_power` sensor does not document its sign convention, so it is worth checking both interpretations against the battery state of charge and the Solplanet app before relying on the value.
 
 ## Add The Grid
 
