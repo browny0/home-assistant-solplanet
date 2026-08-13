@@ -270,6 +270,14 @@ def _create_power_limit_entities_description(
             _power_limit_sensor(
                 isn,
                 data_type,
+                "export_current_limit",
+                mapper=_power_limit_value("maxOutCurr", when=("ctrlType", 0)),
+                unit=UnitOfElectricCurrent.AMPERE,
+                device_class=SensorDeviceClass.CURRENT,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
                 "communication_loss_timeout",
                 path=["lostTime"],
                 unit=UnitOfTime.SECONDS,
