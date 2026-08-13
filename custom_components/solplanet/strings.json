@@ -236,7 +236,8 @@
       "submeter_energy_imported_total": { "name": "Energy imported total" },
       "submeter_energy_exported_today": { "name": "Energy exported today" },
       "submeter_energy_exported_total": { "name": "Energy exported total" },
-      "import_current_limit": { "name": "Import current limit"}
+      "import_current_limit": { "name": "Import current limit"},
+      "export_current_limit": { "name": "Export current limit"}
     },
     "switch": {
       "inverter_power": { "name": "Power" },
