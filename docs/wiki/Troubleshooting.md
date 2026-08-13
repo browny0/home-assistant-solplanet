@@ -46,7 +46,7 @@ To diagnose:
 2. Confirm the **Power measurement** field is filled with the power entity for that source (see [Energy Dashboard](Energy-Dashboard) for the recommended entities).
 3. Confirm the power entity has a current value in **Settings > Developer tools > States** and its `device_class` is `power`.
 4. Confirm the Recorder is not excluding that entity.
-5. If you recently added the entity, wait up to one hour for the first 5-minute power mean statistic to be recorded before the view renders.
+5. If you recently added the entity, wait. Home Assistant displays the message "After setting up a new device, it can take up to 2 hours for new data to arrive in your energy dashboard."
 6. Check **Settings > Dashboards > Energy > Edit dashboard > Customize cards** and confirm the **Now** section has both the **power-sources-graph** and **power-sankey** cards enabled.
 
 If the energy (kWh) fields are configured but the **Power measurement** fields are empty, the historical `/energy/electricity` view works and the live `/energy/now` view stays empty. This is by design, not a bug in the integration.

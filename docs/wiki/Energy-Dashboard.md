@@ -39,7 +39,9 @@ Do not add two entities that measure the same solar panels. This would count the
 
 If your meter comes from a different Home Assistant integration, select its power entity in the **Power measurement** field instead. The friendly name will differ (for example, an EASTRON meter appears as **EASTRON SDM230-Modbus V1 Meter power**).
 
-Power entities follow the Home Assistant Energy dashboard convention: grid positive = importing, battery positive = discharging, solar positive = producing. The **Type of power measurement** dropdown offers **Standard** (entity already follows this convention) and **Inverted** (HA will flip the sign). Use **Standard** if your entity already matches the convention above; switch to **Inverted** if it does not.
+Power entities follow the Home Assistant Energy dashboard convention: grid positive = importing, battery positive = discharging, solar positive = producing. The Home Assistant UI labels for this convention are: grid positive when **consuming from the grid**, battery positive when **discharging the battery** (and negative when charging), solar positive when **producing**.
+
+The **Type of power measurement** radio group in the source dialog offers **No power sensor** (skip the live flow for this source), **Standard** (the entity already follows the convention above), **Inverted** (HA flips the sign), and **Two sensors** (separate positive sensors for each direction, for example **Two sensors** with import and export grid power reported separately). Pick **Standard** if your entity matches the convention; switch to **Inverted** if it does not; choose **Two sensors** if you have a separate sensor for each direction.
 
 If you are unsure which value to pick, force a clear charging or discharging moment and watch **Developer tools > States** while it is happening. The Solplanet `battery_power` sensor does not document its sign convention, so it is worth checking both interpretations against the battery state of charge and the Solplanet app before relying on the value.
 
@@ -72,17 +74,18 @@ If you have a separate solar inverter that is not monitored by this integration,
 Skip this section if your installation does not include a battery.
 
 1. Find **Home battery storage** in the Energy configuration.
-2. Set **Energy going into the battery** to **Battery energy for charging**.
-3. Set **Energy coming out of the battery** to **Battery energy for discharging**.
-4. Set **Power measurement** to **Battery power**. This is required for the live `/energy/now` view.
+2. Set **Energy charged into the battery** to **Battery energy for charging**.
+3. Set **Energy discharged from the battery** to **Battery energy for discharging**.
+4. Set the **Type of power measurement** to **Standard** (or **Inverted** if your battery power entity reports positive when charging instead of discharging), and pick **Battery power** as the entity. This is required for the live `/energy/now` view.
 5. Optionally add the battery state-of-charge sensor to enable the SOC badge in the live view.
-6. Save the configuration.
+6. Optionally add the usable battery capacity (kWh) so the SOC badge is weighted correctly across multiple battery stacks.
+7. Save the configuration.
 
 If you have multiple battery devices, check whether each entity reports an independent stack or repeats the total for the whole system. Add independent stack counters, but add only one entity if every battery repeats the same system total.
 
 ## Wait For Statistics
 
-The Energy dashboard is not a live-power dashboard. Home Assistant builds it from long-term statistics, so new data may take up to an hour to appear. Data recorded before you configure the dashboard may appear, but Home Assistant cannot recover periods from before the integration was installed.
+The Energy dashboard is not a live-power dashboard. Home Assistant builds it from long-term statistics, and the dashboard itself shows the message "After setting up a new device, it can take up to 2 hours for new data to arrive in your energy dashboard." Data recorded before you configure the dashboard may appear, but Home Assistant cannot recover periods from before the integration was installed.
 
 Use the normal Solplanet device entities when you want to watch live power.
 
