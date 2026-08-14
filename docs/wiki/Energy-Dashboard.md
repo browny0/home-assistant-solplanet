@@ -41,7 +41,7 @@ If your meter comes from a different Home Assistant integration, select its powe
 
 Power entities follow the Home Assistant Energy dashboard convention: grid positive = importing, battery positive = discharging, solar positive = producing. The Home Assistant UI labels for this convention are: grid positive when **consuming from the grid**, battery positive when **discharging the battery** (and negative when charging), solar positive when **producing**.
 
-The **Type of power measurement** radio group in the source dialog offers **No power sensor** (skip the live flow for this source), **Standard** (the entity already follows the convention above), **Inverted** (HA flips the sign), and **Two sensors** (separate positive sensors for each direction, for example **Two sensors** with import and export grid power reported separately). Pick **Standard** if your entity matches the convention; switch to **Inverted** if it does not; choose **Two sensors** if you have a separate sensor for each direction.
+The **Type of power measurement** radio group appears only in the **Grid consumption** and **Home battery storage** source dialogs. Solar panels only have a single power sensor field without a sign-flipping option, because solar production is always positive. For grid and battery, the radio group offers **No power sensor** (skip the live flow for this source), **Standard** (the entity already follows the convention above), **Inverted** (HA flips the sign), and **Two sensors** (separate positive sensors for each direction, for example one sensor for grid import and another for grid export). Pick **Standard** if your entity matches the convention; switch to **Inverted** if it does not; choose **Two sensors** if you have a separate sensor for each direction.
 
 If you are unsure which value to pick, force a clear charging or discharging moment and watch **Developer tools > States** while it is happening. The Solplanet `battery_power` sensor does not document its sign convention, so it is worth checking both interpretations against the battery state of charge and the Solplanet app before relying on the value.
 
@@ -85,7 +85,7 @@ If you have multiple battery devices, check whether each entity reports an indep
 
 ## Wait For Statistics
 
-The Energy dashboard is not a live-power dashboard. Home Assistant builds it from long-term statistics, and the dashboard itself shows the message "After setting up a new device, it can take up to 2 hours for new data to arrive in your energy dashboard." Data recorded before you configure the dashboard may appear, but Home Assistant cannot recover periods from before the integration was installed.
+The Energy dashboard is not a live-power dashboard for its historical charts. Home Assistant builds the historical charts (`/energy/electricity` and the rest) from long-term statistics, and the dashboard itself shows the message "After setting up a new device, it can take up to 2 hours for new data to arrive in your energy dashboard." Data recorded before you configure the dashboard may appear, but Home Assistant cannot recover periods from before the integration was installed. The `Now` view, however, is a live-power view that uses the same power sensors you configured for the historical sources.
 
 Use the normal Solplanet device entities when you want to watch live power.
 
