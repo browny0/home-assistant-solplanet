@@ -36,6 +36,21 @@ An individual value may show `unknown` while its device is sleeping or that fiel
 
 After three consecutive full failures, the affected live-data poller waits at least 10 minutes between attempts instead of repeatedly loading an unresponsive dongle. It returns to your configured interval as soon as an update succeeds. Transient all-zero battery responses are ignored so they do not replace the last valid readings. If every battery response is all-zero for three consecutive updates, the battery poller uses the same backoff.
 
+## Energy Now View Is Empty
+
+The `/energy/now` view shows the live power flow between solar, battery, grid, and home. If it is empty while `/energy/electricity` shows data, the live flow cannot be drawn because no power source has a power entity configured.
+
+To diagnose:
+
+1. Open **Settings > Dashboards > Energy** and edit each configured source.
+2. Confirm the **Power measurement** field is filled with the power entity for that source (see [Energy Dashboard](Energy-Dashboard) for the recommended entities).
+3. Confirm the power entity has a current value in **Settings > Developer tools > States** and its `device_class` is `power`.
+4. Confirm the Recorder is not excluding that entity.
+5. If you recently added the entity, wait. Home Assistant displays the message "After setting up a new device, it can take up to 2 hours for new data to arrive in your energy dashboard."
+6. Check **Settings > Dashboards > Energy > Edit dashboard > Customize cards** and confirm the **Now** section has both the **power-sources-graph** and **power-sankey** cards enabled.
+
+If the energy (kWh) fields are configured but the **Power measurement** fields are empty, the historical `/energy/electricity` view works and the live `/energy/now` view stays empty. This is by design, not a bug in the integration.
+
 ## An Action Fails
 
 For battery schedule actions, target the battery's **Schedule Configured** binary sensor.
