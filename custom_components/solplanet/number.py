@@ -92,7 +92,7 @@ def create_battery_entities_description(
             data_field_device_type=BATTERY_IDENTIFIER,
             data_field_data_type="info",
             data_field_path=["discharge_max"],
-            native_min_value=10,
+            native_min_value=5,
             native_max_value=100,
             native_step=1,
             native_unit_of_measurement=PERCENTAGE,
